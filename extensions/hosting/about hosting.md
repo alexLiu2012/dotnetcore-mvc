@@ -1,4 +1,4 @@
-## about generic hosting
+## about hosting
 
 相关程序集：
 
@@ -11,7 +11,9 @@
 
 #### 1.1 summary
 
-* ms 提供的托管应用的宿主服务
+* ms 提供的托管应用的宿主服务，分为 generic host 和 web host
+  * recommend to use “generic host”
+  * web app 中会使用“web host”
 
 #### 1.2 how designed
 
@@ -338,6 +340,8 @@ internal static class HostingLoggerExtensions
 
 ```
 
+
+
 ###### 2.1.2.3 host dispose
 
 ```c#
@@ -535,6 +539,21 @@ public interface IHostApplicationLifetime
 
 ```
 
+##### 2.1.6 host environment
+
+* 封装的 host env 参数，强类型
+
+```c#
+public interface IHostEnvironment
+{    
+    string EnvironmentName { get; set; }        
+    string ApplicationName { get; set; }        
+    string ContentRootPath { get; set; }        
+    IFileProvider ContentRootFileProvider { get; set; }
+}
+
+```
+
 #### 2.2 host builder
 
 ##### 2.2.1 接口
@@ -592,11 +611,16 @@ public class HostBuilder : IHostBuilder
     // 传递数据
     public IDictionary<object, object> Properties { get; } = 
         new Dictionary<object, object>();
-       
-    private IConfiguration _hostConfiguration;    
-    private IConfiguration _appConfiguration;    
-    private HostBuilderContext _hostBuilderContext;    
-    private HostingEnvironment _hostingEnvironment;    
+    
+    // a - host configuration
+    private IConfiguration _hostConfiguration;
+    // b - host application configuration
+    private IConfiguration _appConfiguration;
+    // c - host build context
+    private HostBuilderContext _hostBuilderContext;
+    // d - host environment
+    private HostingEnvironment _hostingEnvironment;
+    // e - service provider
     private IServiceProvider _appServices;
         
     // 构建 host                    
@@ -626,7 +650,30 @@ public class HostBuilder : IHostBuilder
         // 从 di 解析 host，
         // 由 di 控制 host 生命周期（使用后 dispose）
         return _appServices.GetRequiredService<IHost>();
-    }                                                
+    }
+    
+    
+    
+    
+    
+    private string ResolveContentRootPath(string contentRootPath, string basePath)
+    {
+        if (string.IsNullOrEmpty(contentRootPath))
+        {
+            return basePath;
+        }
+        if (Path.IsPathRooted(contentRootPath))
+        {
+            return contentRootPath;
+        }
+        return Path.Combine(Path.GetFullPath(basePath), contentRootPath);
+    }
+    
+    
+    
+    
+    
+    
 }
 
 ```
@@ -864,7 +911,8 @@ public static class HostingHostBuilderExtensions
 
 ```c#
 public static class ServiceCollectionHostedServiceExtensions
-{    
+{
+    
     public static IServiceCollection 
         AddHostedService
         	<[DynamicallyAccessedMembers(
@@ -892,6 +940,12 @@ public static class ServiceCollectionHostedServiceExtensions
         return services;
     }
 }
+
+```
+
+###### 2.2.4.6 配置 lifetime
+
+```c#
 
 ```
 
@@ -951,19 +1005,6 @@ public class HostBuilder : IHostBuilder
         
         _hostingEnvironment.ContentRootFileProvider = 
             new PhysicalFileProvider(_hostingEnvironment.ContentRootPath);
-    }
-    
-    private string ResolveContentRootPath(string contentRootPath, string basePath)
-    {
-        if (string.IsNullOrEmpty(contentRootPath))
-        {
-            return basePath;
-        }
-        if (Path.IsPathRooted(contentRootPath))
-        {
-            return contentRootPath;
-        }
-        return Path.Combine(Path.GetFullPath(basePath), contentRootPath);
     }
 }
 
@@ -1041,7 +1082,7 @@ public class HostBuilder : IHostBuilder
         //#pragma warning restore CS0618 // Type or member is obsolete            
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         
-        /* 注册 host lifetime（默认 console lifetime）*/
+        /* 注册 host lifetime */
         services.AddSingleton<IHostLifetime, ConsoleLifetime>();
         
         /* 注册 host */
@@ -1341,10 +1382,8 @@ public class ConsoleLifetime
                 "Waiting for the host to be disposed. Ensure all 'IHost' instances are wrapped in 'using' blocks.");
         }
         _shutdownBlock.WaitOne();
-        // On Linux if the shutdown is triggered by SIGTERM 
-        // then that's signaled with the 143 exit code.
-        // Suppress that since we shut down gracefully. 
-        // https://github.com/dotnet/aspnetcore/issues/6526
+        // On Linux if the shutdown is triggered by SIGTERM then that's signaled with the 143 xit code.
+        // Suppress that since we shut down gracefully. https://github.com/dotnet/aspnetcore/issues/6526
         System.Environment.ExitCode = 0;
     }
     
@@ -1463,7 +1502,6 @@ public class SystemdLifetime : IHostLifetime, IDisposable
             throw new ArgumentNullException(nameof(applicationLifetime));
         SystemdNotifier = systemdNotifier ?? 
             throw new ArgumentNullException(nameof(systemdNotifier));
-        
         Logger = loggerFactory.CreateLogger("Microsoft.Hosting.Lifetime");
     }                               
 }
@@ -1509,8 +1547,7 @@ public class SystemdLifetime
     private void OnApplicationStarted()
     {
         Logger.LogInformation(
-            "Application started.
-            "Hosting environment: {EnvironmentName}; Content root path: {ContentRoot}",
+            "Application started. Hosting environment: {EnvironmentName}; Content root path: {ContentRoot}",
             Environment.EnvironmentName, Environment.ContentRootPath);
         
         SystemdNotifier.Notify(ServiceState.Ready);
@@ -1528,13 +1565,12 @@ public class SystemdLifetime
     // process exit 事件
     private void OnProcessExit(object sender, EventArgs e)
     {
-        ApplicationLifetime.StopApplication();        
+        ApplicationLifetime.StopApplication();
+        
         _shutdownBlock.WaitOne();
         
-        // On Linux if the shutdown is triggered by SIGTERM
-        // then that's signaled with the 143 exit code.
-        // Suppress that since we shut down gracefully. 
-        // https://github.com/dotnet/aspnetcore/issues/6526
+        // On Linux if the shutdown is triggered by SIGTERM then that's signaled with the 143 exit code.
+        // Suppress that since we shut down gracefully. https://github.com/dotnet/aspnetcore/issues/6526
         System.Environment.ExitCode = 0;
     }
 }
@@ -1553,8 +1589,10 @@ public class SystemdLifetime
     
     public void Dispose()
     {
-        _shutdownBlock.Set();        
-        AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;        
+        _shutdownBlock.Set();
+        
+        AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+        
         _applicationStartedRegistration.Dispose();
         _applicationStoppingRegistration.Dispose();
     }
@@ -1739,8 +1777,7 @@ public class WindowsServiceLifetime
         base.OnStart(args);
     }
     
-    // Called by base.Stop. 
-    // This may be called multiple times by service Stop, ApplicationStopping, and StopAsync.
+    // Called by base.Stop. This may be called multiple times by service Stop, ApplicationStopping, and StopAsync.
     // That's OK because StopApplication uses a CancellationTokenSource and prevents any recursion.
     protected override void OnStop()
     {
@@ -1788,8 +1825,7 @@ public static class WindowsServiceLifetimeHostBuilderExtensions
     {
         if (WindowsServiceHelpers.IsWindowsService())
         {
-            // Host.CreateDefaultBuilder uses CurrentDirectory for VS scenarios, 
-            // but CurrentDirectory for services is c:\Windows\System32.
+            // Host.CreateDefaultBuilder uses CurrentDirectory for VS scenarios, but CurrentDirectory for services is c:\Windows\System32.
             hostBuilder.UseContentRoot(AppContext.BaseDirectory);
             hostBuilder.ConfigureLogging(
                 (hostingContext, logging) =>
@@ -1874,11 +1910,9 @@ public class ApplicationLifetime : IApplicationLifetime, IHostApplicationLifetim
     /// </summary>
     public void StopApplication()
     {
-        // Lock on CTS to synchronize multiple calls to StopApplication. 
-        // This guarantees that the first call to StopApplication 
-        // and its callbacks run to completion before subsequent calls to StopApplication,
-        // which will no-op since the first call already requested cancellation, 
-        // get a chance to execute.
+        // Lock on CTS to synchronize multiple calls to StopApplication. This guarantees that the first call
+        // to StopApplication and its callbacks run to completion before subsequent calls to StopApplication,
+        // which will no-op since the first call already requested cancellation, get a chance to execute.
         lock (_stoppingSource)
         {
             try
@@ -2158,17 +2192,4 @@ public static class Host
 ```
 
 ### 3. practice
-
-#### 3.1 创建 host builder
-
-* 使用 Host 静态类的方法创建 default host builder
-
-#### 3.2 配置 host builder
-
-* 通过 host builder 的方法和扩展方法配置 host builder
-
-#### 3.3 创建 host
-
-* 调用 host builder 的 build 方法创建 host
-* 运行host
 
