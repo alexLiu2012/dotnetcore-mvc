@@ -12,13 +12,45 @@
 #### 1.1 summary
 
 * .net core 实现了 dependency injection
+* DI 是 .net core 以及 asp.net core 程序的基础
+* 尽量使用 di 注册、解析服务（object），因为 di 可以
+  * 很好的处理依赖（dependency）
+  * 处理 dispose
+
+#### 1.2 how designed
+
+##### 1.2.1 service descriptor
+
+* 描述托管的服务
+  * 三要素：service_type, implementation_type, service_lifetime
+
+##### 1.2.2 service collection
+
+* 注册服务描述（service descriptor）的容器
+* 由其构建 service provider
+
+##### 1.2.3 service provider
+
+###### 1.2.3.1. service provider
+
+* （已注册）服务提供者
+
+###### 1.2.3.2 service provider factory
+
+* 构建 service provider 的工厂方法
+* ms 默认使用 default service provider factory
+* 可以替换为第三方 service provider factory
+
+##### 1.2.4 service provider engine
+
+* ms service provider 使用的、实际解析服务的引擎
 
 ### 2. details
 
 #### 2.1 service descriptor
 
 * 描述服务的类型封装
-* by:  service type, implementation, and lifetime
+* 三要素:  service_type, implementation_type, service_lifetime
 
 ```c#
 [DebuggerDisplay(
@@ -29,13 +61,13 @@ public class ServiceDescriptor
 {
     public ServiceLifetime Lifetime { get; }    
     public Type ServiceType { get; }    
-    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
-    public Type? ImplementationType { get; }
     
+    [DynamicallyAccessedMembers(
+        DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public Type? ImplementationType { get; }    
     public object? ImplementationInstance { get; }    
     public Func<IServiceProvider, object>? ImplementationFactory { get; }
-
-    /// <inheritdoc />
+    
     public override string ToString()
     {
         string? lifetime = 
@@ -56,43 +88,16 @@ public class ServiceDescriptor
         
         return lifetime + 
             $"{nameof(ImplementationInstance)}: {ImplementationInstance}";
-    }
-    
-    internal Type GetImplementationType()
-    {
-        if (ImplementationType != null)
-        {
-            return ImplementationType;
-        }
-        else if (ImplementationInstance != null)
-        {
-            return ImplementationInstance.GetType();
-        }
-        else if (ImplementationFactory != null)
-        {
-            // factory<TService,TImplement>
-            Type[]? typeArguments = ImplementationFactory.GetType().GenericTypeArguments; 
-            Debug.Assert(typeArguments.Length == 2);
-            // 返回 TImplement
-            return typeArguments[1];
-        }
-        
-        // 没有获取到 implementation type，
-        Debug.Assert(
-            false, 
-            "ImplementationType, 
-            "ImplementationInstance or 
-            "ImplementationFactory must be non null");
-        // 返回 null
-        return null;
-    }                                                 
+    }         
 }
 
 ```
 
-##### 2.1.1 构造
+##### 2.1.1 组件
 
-###### 2.1.1.1 注入 service type + lifetime
+###### 2.1.1.1 私有（基本）构造函数
+
+* 只注入 service_type，service_lifetime
 
 ```c#
 public class ServiceDescriptor
@@ -106,7 +111,52 @@ public class ServiceDescriptor
 
 ```
 
-###### 2.1.1.2  by implementation type
+###### 2.1.1.2 get implementation type
+
+* impl type = > impl instance = > impl factory (func)
+
+```c#
+public class ServiceDescriptor
+{
+    internal Type GetImplementationType()
+    {
+        if (ImplementationType != null)
+        {
+            return ImplementationType;
+        }
+        else if (ImplementationInstance != null)
+        {
+            return ImplementationInstance.GetType();
+        }
+        else if (ImplementationFactory != null)
+        {
+            // 获取 implementationFactory 的泛型参数,
+            // factory<TService,TImplementation> 的 TImplementation
+            Type[]? typeArguments = ImplementationFactory
+                .GetType()
+                .GenericTypeArguments; 
+            // 如果 TImplementation 不为空，
+            // 返回 TImplementation (type)
+            Debug.Assert(typeArguments.Length == 2);            
+            return typeArguments[1];
+        }
+        
+        // 没有获取到 implementation type，
+        // 返回 null
+        Debug.Assert(
+            false, 
+            "ImplementationType, 
+            "ImplementationInstance or 
+            "ImplementationFactory must be non null");        
+        return null;
+    }                                                
+}
+
+```
+
+##### 2.1.2 由构造函数创建
+
+###### 2.1.1.1  by impl type
 
 ```c#
 public class ServiceDescriptor
@@ -134,7 +184,7 @@ public class ServiceDescriptor
          
 ```
 
-###### 2.1.1.3 by implementation instance
+###### 2.1.1.2 by impl instance
 
 ```c#
 public class ServiceDescriptor
@@ -160,7 +210,7 @@ public class ServiceDescriptor
 
 ```
 
-###### 2.1.1.4 by implementation factory
+###### 2.1.1.3 by impl factory (func)
 
 ```c#
 public class ServiceDescriptor
@@ -186,9 +236,9 @@ public class ServiceDescriptor
 
 ```
 
-##### 2.1.2 describe 
+##### 2.1.2 静态方法创建
 
-###### 2.1.2.1 by implementation type
+###### 2.1.2.1 by impl type
 
 ```c#
 public class ServiceDescriptor
@@ -225,7 +275,7 @@ public class ServiceDescriptor
     
 ```
 
-###### 2.1.2.2 by implementation factory
+###### 2.1.2.2 by impl factory
 
 ```c#
 public class ServiceDescriptor
@@ -244,14 +294,14 @@ public class ServiceDescriptor
 
 ```
 
-##### 2.1.3 singleton
+##### 2.1.3 静态 singleton
 
-###### 2.1.3.1 by implementation type
+###### 2.1.3.1 by impl type
 
 ```c#
 public class ServiceDescriptor
 {
-    // 泛型方法，反射注册的
+    // 泛型方法
     public static ServiceDescriptor Singleton
         <TService, 
     	 [DynamicallyAccessedMembers(
@@ -263,7 +313,7 @@ public class ServiceDescriptor
         return Describe<TService, TImplementation>(ServiceLifetime.Singleton);
     }
 
-    // 参数方法，反射注册的    
+    // 参数方法    
     public static ServiceDescriptor Singleton(
         Type service,     
         [DynamicallyAccessedMembers(
@@ -279,7 +329,10 @@ public class ServiceDescriptor
             throw new ArgumentNullException(nameof(implementationType));
         }
         
-        return Describe(service, implementationType, ServiceLifetime.Singleton);
+        return Describe(
+            service, 
+            implementationType, 
+            ServiceLifetime.Singleton);
     }
 
     // 泛型方法    
@@ -293,36 +346,19 @@ public class ServiceDescriptor
             throw new ArgumentNullException(nameof(implementationFactory));
         }
         
-        return Describe(typeof(TService), implementationFactory, ServiceLifetime.Singleton);
-    }
-
-        
-    
-
-        
+        return Describe(
+            typeof(TService), 
+            implementationFactory, 
+            ServiceLifetime.Singleton);
+    }                    
     
 ```
 
-###### 2.1.3.2 by implementation instance
+###### 2.1.3.2 by impl instance
 
 ```c#
 public class ServiceDescriptor
 {    
-    // 泛型方法
-    public static ServiceDescriptor Singleton<TService>(
-        TService implementationInstance)            
-        	where TService : class
-    {
-        if (implementationInstance == null)
-        {
-            throw new ArgumentNullException(nameof(implementationInstance));
-        }
-        
-        return Singleton(
-            typeof(TService), 
-            implementationInstance);
-    }
-    
     // 参数方法
     public static ServiceDescriptor Singleton(
         Type serviceType,
@@ -341,11 +377,26 @@ public class ServiceDescriptor
             serviceType, 
             implementationInstance);
     }
+    
+    // 泛型方法
+    public static ServiceDescriptor Singleton<TService>(
+        TService implementationInstance)            
+        	where TService : class
+    {
+        if (implementationInstance == null)
+        {
+            throw new ArgumentNullException(nameof(implementationInstance));
+        }
+        
+        return Singleton(
+            typeof(TService), 
+            implementationInstance);
+    }        
 }
 
 ```
 
-###### 2.1.3.3 by implementation factory
+###### 2.1.3.3 by impl factory
 
 ```c#
 public class ServiceDescriptor
@@ -389,9 +440,9 @@ public class ServiceDescriptor
 
 ```
 
-##### 2.1.4 scoped
+##### 2.1.4 静态 scoped
 
-###### 2.1.4.1 by implementation type
+###### 2.1.4.1 by impl type
 
 ```c#
 public class ServiceDescriptor
@@ -420,15 +471,11 @@ public class ServiceDescriptor
             implementationType, 
             ServiceLifetime.Scoped);
     }
+}
 
-        
-    
-
-        
-    
 ```
 
-###### 2.1.4.2 by implementation factory
+###### 2.1.4.2 by impl factory
 
 ```c#
 public class ServiceDescriptor
@@ -443,7 +490,10 @@ public class ServiceDescriptor
             throw new ArgumentNullException(nameof(implementationFactory));
         }
         
-        return Describe(typeof(TService), implementationFactory, ServiceLifetime.Scoped);
+        return Describe(
+            typeof(TService), 
+            implementationFactory, 
+            ServiceLifetime.Scoped);
     }
     
     // 参数方法
@@ -460,7 +510,10 @@ public class ServiceDescriptor
             throw new ArgumentNullException(nameof(implementationFactory));
         }
         
-        return Describe(service, implementationFactory, ServiceLifetime.Scoped);
+        return Describe(
+            service, 
+            implementationFactory, 
+            ServiceLifetime.Scoped);
     }
 }
 ```
@@ -489,13 +542,14 @@ public class ServiceDescriptor
 
 ```
 
-##### 2.1.5 transient
+##### 2.1.5 静态 transient
 
-###### 2.1.5.1 by implementation type
+###### 2.1.5.1 by impl type
 
 ```c#
 public class ServiceDescriptor
 {
+    // 泛型方法
     public static ServiceDescriptor Transient
         <TService, 
     	 [DynamicallyAccessedMembers(
@@ -506,7 +560,8 @@ public class ServiceDescriptor
     {
         return Describe<TService, TImplementation>(ServiceLifetime.Transient);
     }
-           
+    
+    // 参数方法
     public static ServiceDescriptor Transient(
         Type service,         
         [DynamicallyAccessedMembers(
@@ -531,7 +586,7 @@ public class ServiceDescriptor
                         
 ```
 
-###### 2.1.5.2 by implementation factory
+###### 2.1.5.2 by impl factory
 
 ```c#
 public class ServiceDescriptor
@@ -621,10 +676,23 @@ public class ServiceCollection : IServiceCollection
     private readonly List<ServiceDescriptor> _descriptors = new List<ServiceDescriptor>();
         
     public int Count => _descriptors.Count;        
-    public bool IsReadOnly => false;
+    public bool IsReadOnly => false;        
+       
+    /* enumerator */
+                
+    /* crud */ 
     
-    // 遍历器
-    public ServiceDescriptor this[int index]
+    
+}
+
+```
+
+###### 2.2.2.1 enumerator
+
+```c#
+public class ServiceCollection : IServiceCollection
+{
+     public ServiceDescriptor this[int index]
     {
         get
         {
@@ -636,8 +704,6 @@ public class ServiceCollection : IServiceCollection
         }
     }
     
-    /* get enumerator */
-    
     public IEnumerator<ServiceDescriptor> GetEnumerator()
     {
         return _descriptors.GetEnumerator();
@@ -647,10 +713,15 @@ public class ServiceCollection : IServiceCollection
     {
         return GetEnumerator();
     }
-    
-    
-    /* crud */ 
-    
+}
+
+```
+
+###### 2.2.2.2 crud
+
+```c#
+public class ServiceCollection : IServiceCollection
+{
     void ICollection<ServiceDescriptor>.Add(ServiceDescriptor item)
     {
         _descriptors.Add(item);
@@ -694,14 +765,18 @@ public class ServiceCollection : IServiceCollection
 
 ```
 
-##### 2.2.3 service descriptor 扩展方法
 
-###### 2.2.3.1 add
+
+
+
+##### 2.2.3 扩展方法 by descriptor
+
+###### 2.2.3.1 add 
 
 ```c#
 public static class ServiceCollectionDescriptorExtensions
 {
-    
+    // add descriptor
     public static IServiceCollection Add(
         this IServiceCollection collection,
         ServiceDescriptor descriptor)
@@ -719,7 +794,8 @@ public static class ServiceCollectionDescriptorExtensions
         
         return collection;
     }
-        
+    
+    // add IEnumerable<descriptor>
     public static IServiceCollection Add(
         this IServiceCollection collection,
         IEnumerable<ServiceDescriptor> descriptors)
@@ -727,8 +803,7 @@ public static class ServiceCollectionDescriptorExtensions
         if (collection == null)
         {
             throw new ArgumentNullException(nameof(collection));
-        }
-        
+        }        
         if (descriptors == null)
         {
             throw new ArgumentNullException(nameof(descriptors));
@@ -742,469 +817,20 @@ public static class ServiceCollectionDescriptorExtensions
         return collection;
     }
 
-        
-    public static void TryAdd(
-        this IServiceCollection collection,
-        ServiceDescriptor descriptor)
-    {
-        if (collection == null)
-        {
-            throw new ArgumentNullException(nameof(collection));
-        }        
-        if (descriptor == null)
-        {
-            throw new ArgumentNullException(nameof(descriptor));
-        }
-        
-        int count = collection.Count;
-        for (int i = 0; i < count; i++)
-        {
-            if (collection[i].ServiceType == descriptor.ServiceType)
-            {
-                // Already added
-                return;
-            }
-        }
-        
-        collection.Add(descriptor);
-    }
-
-        
-    public static void TryAdd(
-        this IServiceCollection collection,
-        IEnumerable<ServiceDescriptor> descriptors)
-    {
-        if (collection == null)
-        {
-            throw new ArgumentNullException(nameof(collection));
-        }
-        
-        if (descriptors == null)
-        {
-            throw new ArgumentNullException(nameof(descriptors));
-        }
-        
-        foreach (ServiceDescriptor? d in descriptors)
-        {
-            collection.TryAdd(d);
-        }
-    }
-
-        
-        public static void TryAddTransient(
-            this IServiceCollection collection,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type service)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            var descriptor = ServiceDescriptor.Transient(service, service);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddTransient(
-            this IServiceCollection collection,
-            Type service,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            if (implementationType == null)
-            {
-                throw new ArgumentNullException(nameof(implementationType));
-            }
-
-            var descriptor = ServiceDescriptor.Transient(service, implementationType);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddTransient(
-            this IServiceCollection collection,
-            Type service,
-            Func<IServiceProvider, object> implementationFactory)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            var descriptor = ServiceDescriptor.Transient(service, implementationFactory);
-            TryAdd(collection, descriptor);
-        }
-
-        
     
-        public static void TryAddTransient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(this IServiceCollection collection)
-            where TService : class
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
 
-            TryAddTransient(collection, typeof(TService), typeof(TService));
-        }
-
-        
     
-        public static void TryAddTransient<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection collection)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            TryAddTransient(collection, typeof(TService), typeof(TImplementation));
-        }
+   
+        
+        
+        
+        
+        
+        
+        
+        
 
         
-        public static void TryAddTransient<TService>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TService> implementationFactory)
-            where TService : class
-        {
-            services.TryAdd(ServiceDescriptor.Transient(implementationFactory));
-        }
-
-        
-        public static void TryAddScoped(
-            this IServiceCollection collection,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type service)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            var descriptor = ServiceDescriptor.Scoped(service, service);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddScoped(
-            this IServiceCollection collection,
-            Type service,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            if (implementationType == null)
-            {
-                throw new ArgumentNullException(nameof(implementationType));
-            }
-
-            var descriptor = ServiceDescriptor.Scoped(service, implementationType);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddScoped(
-            this IServiceCollection collection,
-            Type service,
-            Func<IServiceProvider, object> implementationFactory)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            var descriptor = ServiceDescriptor.Scoped(service, implementationFactory);
-            TryAdd(collection, descriptor);
-        }
-
-       
-        public static void TryAddScoped<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(this IServiceCollection collection)
-            where TService : class
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            TryAddScoped(collection, typeof(TService), typeof(TService));
-        }
-
-       
-        public static void TryAddScoped<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection collection)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            TryAddScoped(collection, typeof(TService), typeof(TImplementation));
-        }
-
-        
-        public static void TryAddScoped<TService>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TService> implementationFactory)
-            where TService : class
-        {
-            services.TryAdd(ServiceDescriptor.Scoped(implementationFactory));
-        }
-
-        
-        public static void TryAddSingleton(
-            this IServiceCollection collection,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type service)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            var descriptor = ServiceDescriptor.Singleton(service, service);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddSingleton(
-            this IServiceCollection collection,
-            Type service,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            if (implementationType == null)
-            {
-                throw new ArgumentNullException(nameof(implementationType));
-            }
-
-            var descriptor = ServiceDescriptor.Singleton(service, implementationType);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddSingleton(
-            this IServiceCollection collection,
-            Type service,
-            Func<IServiceProvider, object> implementationFactory)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (service == null)
-            {
-                throw new ArgumentNullException(nameof(service));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            var descriptor = ServiceDescriptor.Singleton(service, implementationFactory);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddSingleton<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(this IServiceCollection collection)
-            where TService : class
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            TryAddSingleton(collection, typeof(TService), typeof(TService));
-        }
-
-       
-        public static void TryAddSingleton<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection collection)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            TryAddSingleton(collection, typeof(TService), typeof(TImplementation));
-        }
-
-        
-        public static void TryAddSingleton<TService>(this IServiceCollection collection, TService instance)
-            where TService : class
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (instance == null)
-            {
-                throw new ArgumentNullException(nameof(instance));
-            }
-
-            var descriptor = ServiceDescriptor.Singleton(typeof(TService), instance);
-            TryAdd(collection, descriptor);
-        }
-
-        
-        public static void TryAddSingleton<TService>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TService> implementationFactory)
-            where TService : class
-        {
-            services.TryAdd(ServiceDescriptor.Singleton(implementationFactory));
-        }
-
-        
-        public static void TryAddEnumerable(
-            this IServiceCollection services,
-            ServiceDescriptor descriptor)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (descriptor == null)
-            {
-                throw new ArgumentNullException(nameof(descriptor));
-            }
-
-            Type? implementationType = descriptor.GetImplementationType();
-
-            if (implementationType == typeof(object) ||
-                implementationType == descriptor.ServiceType)
-            {
-                throw new ArgumentException(
-                    SR.Format(SR.TryAddIndistinguishableTypeToEnumerable,
-                        implementationType,
-                        descriptor.ServiceType),
-                    nameof(descriptor));
-            }
-
-            int count = services.Count;
-            for (int i = 0; i < count; i++)
-            {
-                ServiceDescriptor service = services[i];
-                if (service.ServiceType == descriptor.ServiceType &&
-                    service.GetImplementationType() == implementationType)
-                {
-                    // Already added
-                    return;
-                }
-            }
-
-            services.Add(descriptor);
-        }
-
-        /// <summary>
-        /// Adds the specified <see cref="ServiceDescriptor"/>s if an existing descriptor with the same
-        /// <see cref="ServiceDescriptor.ServiceType"/> and an implementation that does not already exist
-        /// in <paramref name="services."/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/>.</param>
-        /// <param name="descriptors">The <see cref="ServiceDescriptor"/>s.</param>
-        /// <remarks>
-        /// Use <see cref="TryAddEnumerable(IServiceCollection, ServiceDescriptor)"/> when registering a service
-        /// implementation of a service type that
-        /// supports multiple registrations of the same service type. Using
-        /// <see cref="Add(IServiceCollection, ServiceDescriptor)"/> is not idempotent and can add
-        /// duplicate
-        /// <see cref="ServiceDescriptor"/> instances if called twice. Using
-        /// <see cref="TryAddEnumerable(IServiceCollection, ServiceDescriptor)"/> will prevent registration
-        /// of multiple implementation types.
-        /// </remarks>
-        public static void TryAddEnumerable(
-            this IServiceCollection services,
-            IEnumerable<ServiceDescriptor> descriptors)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (descriptors == null)
-            {
-                throw new ArgumentNullException(nameof(descriptors));
-            }
-
-            foreach (ServiceDescriptor? d in descriptors)
-            {
-                services.TryAddEnumerable(d);
-            }
-        }
-
-        /// <summary>
-        /// Removes the first service in <see cref="IServiceCollection"/> with the same service type
-        /// as <paramref name="descriptor"/> and adds <paramref name="descriptor"/> to the collection.
-        /// </summary>
-        /// <param name="collection">The <see cref="IServiceCollection"/>.</param>
-        /// <param name="descriptor">The <see cref="ServiceDescriptor"/> to replace with.</param>
-        /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
         public static IServiceCollection Replace(
             this IServiceCollection collection,
             ServiceDescriptor descriptor)
@@ -1239,10 +865,7 @@ public static class ServiceCollectionDescriptorExtensions
         /// </summary>
         /// <param name="collection">The <see cref="IServiceCollection"/>.</param>
         /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
-        public static IServiceCollection RemoveAll<T>(this IServiceCollection collection)
-        {
-            return RemoveAll(collection, typeof(T));
-        }
+        
 
         /// <summary>
         /// Removes all services of type <paramref name="serviceType"/> in <see cref="IServiceCollection"/>.
@@ -1250,695 +873,1168 @@ public static class ServiceCollectionDescriptorExtensions
         /// <param name="collection">The <see cref="IServiceCollection"/>.</param>
         /// <param name="serviceType">The service type to remove.</param>
         /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
-        public static IServiceCollection RemoveAll(this IServiceCollection collection, Type serviceType)
-        {
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            for (int i = collection.Count - 1; i >= 0; i--)
-            {
-                ServiceDescriptor? descriptor = collection[i];
-                if (descriptor.ServiceType == serviceType)
-                {
-                    collection.RemoveAt(i);
-                }
-            }
-
-            return collection;
-        }
+        
     }
 ```
 
+###### 2.2.3.2 try add
 
+* 如果 descriptor 的 service_type 已经注册，
+* 不添加 descriptor
 
-##### 2.2.4 singleton, scoped, transient 扩展方法
+```c#
+public static class ServiceCollectionDescriptorExtensions
+{
+    // try add descriptor    
+    public static void TryAdd(
+        this IServiceCollection collection,
+        ServiceDescriptor descriptor)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (descriptor == null)
+        {
+            throw new ArgumentNullException(nameof(descriptor));
+        }
+        
+        int count = collection.Count;
+        for (int i = 0; i < count; i++)
+        {
+            if (collection[i].ServiceType == descriptor.ServiceType)
+            {
+                // 已经注册了 (service_type) 的 descriptor，退出
+                // Already added
+                return;
+            }
+        }
+        
+        collection.Add(descriptor);
+    }
+
+    // try add descriptors    
+    public static void TryAdd(
+        this IServiceCollection collection,
+        IEnumerable<ServiceDescriptor> descriptors)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (descriptors == null)
+        {
+            throw new ArgumentNullException(nameof(descriptors));
+        }
+        
+        foreach (ServiceDescriptor? d in descriptors)
+        {
+            collection.TryAdd(d);
+        }
+    }
+}
+
+```
+
+###### 2.2.3.3 try add enumerable
+
+* 如果：
+  * descriptor 中的 imple_type 是具体 object，
+  * imple_type 与 service_type 相同
+* 不添加 descriptor
+
+```c#
+public static class ServiceCollectionDescriptorExtensions
+{
+    // try add enumerable descriptor
+    public static void TryAddEnumerable(
+        this IServiceCollection services,
+        ServiceDescriptor descriptor)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (descriptor == null)
+        {
+            throw new ArgumentNullException(nameof(descriptor));
+        }
+        
+        Type? implementationType = descriptor.GetImplementationType();
+        
+        if (implementationType == typeof(object) ||
+            implementationType == descriptor.ServiceType)
+        {
+            throw new ArgumentException(
+                SR.Format(SR.TryAddIndistinguishableTypeToEnumerable,
+                          implementationType,
+                          descriptor.ServiceType),
+                nameof(descriptor));
+        }
+        
+        int count = services.Count;
+        for (int i = 0; i < count; i++)
+        {
+            ServiceDescriptor service = services[i];
+            if (service.ServiceType == descriptor.ServiceType &&
+                service.GetImplementationType() == implementationType)
+            {
+                // Already added
+                return;
+            }
+        }
+        
+        services.Add(descriptor);
+    }
+    
+    // try add enumerable IEnumerable<descriptor>
+    public static void TryAddEnumerable(
+        this IServiceCollection services,
+        IEnumerable<ServiceDescriptor> descriptors)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        
+        if (descriptors == null)
+        {
+            throw new ArgumentNullException(nameof(descriptors));
+        }
+        
+        foreach (ServiceDescriptor? d in descriptors)
+        {
+            services.TryAddEnumerable(d);
+        }
+    }
+}
+
+```
+
+###### 2.2.3.4 remove all
+
+```c#
+public static class ServiceCollectionDescriptorExtensions
+{
+    public static IServiceCollection RemoveAll(
+        this IServiceCollection collection, 
+        Type serviceType)
+    {
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }
+        
+        for (int i = collection.Count - 1; i >= 0; i--)
+        {
+            ServiceDescriptor? descriptor = collection[i];
+            if (descriptor.ServiceType == serviceType)
+            {
+                collection.RemoveAt(i);
+            }
+        }
+        
+        return collection;
+    }
+    
+    public static IServiceCollection RemoveAll<T>(this IServiceCollection collection)
+    {
+        return RemoveAll(collection, typeof(T));
+    }
+}
+
+```
+
+##### 2.2.4 扩展方法 by service
+
+###### 2.2.4.1 add
+
+* 通过三要素向 service collection 中注册 service
 
 ```c#
 public static class ServiceCollectionServiceExtensions
+{
+    // by impl type
+    private static IServiceCollection Add(
+        IServiceCollection collection,
+        Type serviceType,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType,
+        ServiceLifetime lifetime)
     {
-        /// <summary>
-        /// Adds a transient service of the type specified in <paramref name="serviceType"/> with an
-        /// implementation of the type specified in <paramref name="implementationType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationType">The implementation type of the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient(
-            this IServiceCollection services,
-            Type serviceType,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationType == null)
-            {
-                throw new ArgumentNullException(nameof(implementationType));
-            }
-
-            return Add(services, serviceType, implementationType, ServiceLifetime.Transient);
-        }
-
-        /// <summary>
-        /// Adds a transient service of the type specified in <paramref name="serviceType"/> with a
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient(
-            this IServiceCollection services,
-            Type serviceType,
-            Func<IServiceProvider, object> implementationFactory)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return Add(services, serviceType, implementationFactory, ServiceLifetime.Transient);
-        }
-
-        /// <summary>
-        /// Adds a transient service of the type specified in <typeparamref name="TService"/> with an
-        /// implementation type specified in <typeparamref name="TImplementation"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            return services.AddTransient(typeof(TService), typeof(TImplementation));
-        }
-
-        /// <summary>
-        /// Adds a transient service of the type specified in <paramref name="serviceType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register and the implementation to use.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient(
-            this IServiceCollection services,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type serviceType)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            return services.AddTransient(serviceType, serviceType);
-        }
-
-        /// <summary>
-        /// Adds a transient service of the type specified in <typeparamref name="TService"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(this IServiceCollection services)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            return services.AddTransient(typeof(TService));
-        }
-
-        /// <summary>
-        /// Adds a transient service of the type specified in <typeparamref name="TService"/> with a
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient<TService>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TService> implementationFactory)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return services.AddTransient(typeof(TService), implementationFactory);
-        }
-
-        /// <summary>
-        /// Adds a transient service of the type specified in <typeparamref name="TService"/> with an
-        /// implementation type specified in <typeparamref name="TImplementation" /> using the
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Transient"/>
-        public static IServiceCollection AddTransient<TService, TImplementation>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TImplementation> implementationFactory)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return services.AddTransient(typeof(TService), implementationFactory);
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <paramref name="serviceType"/> with an
-        /// implementation of the type specified in <paramref name="implementationType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationType">The implementation type of the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped(
-            this IServiceCollection services,
-            Type serviceType,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationType == null)
-            {
-                throw new ArgumentNullException(nameof(implementationType));
-            }
-
-            return Add(services, serviceType, implementationType, ServiceLifetime.Scoped);
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <paramref name="serviceType"/> with a
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped(
-            this IServiceCollection services,
-            Type serviceType,
-            Func<IServiceProvider, object> implementationFactory)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return Add(services, serviceType, implementationFactory, ServiceLifetime.Scoped);
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <typeparamref name="TService"/> with an
-        /// implementation type specified in <typeparamref name="TImplementation"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            return services.AddScoped(typeof(TService), typeof(TImplementation));
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <paramref name="serviceType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register and the implementation to use.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped(
-            this IServiceCollection services,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type serviceType)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            return services.AddScoped(serviceType, serviceType);
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <typeparamref name="TService"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(this IServiceCollection services)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            return services.AddScoped(typeof(TService));
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <typeparamref name="TService"/> with a
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped<TService>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TService> implementationFactory)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return services.AddScoped(typeof(TService), implementationFactory);
-        }
-
-        /// <summary>
-        /// Adds a scoped service of the type specified in <typeparamref name="TService"/> with an
-        /// implementation type specified in <typeparamref name="TImplementation" /> using the
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Scoped"/>
-        public static IServiceCollection AddScoped<TService, TImplementation>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TImplementation> implementationFactory)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return services.AddScoped(typeof(TService), implementationFactory);
-        }
-
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <paramref name="serviceType"/> with an
-        /// implementation of the type specified in <paramref name="implementationType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationType">The implementation type of the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton(
-            this IServiceCollection services,
-            Type serviceType,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationType == null)
-            {
-                throw new ArgumentNullException(nameof(implementationType));
-            }
-
-            return Add(services, serviceType, implementationType, ServiceLifetime.Singleton);
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <paramref name="serviceType"/> with a
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton(
-            this IServiceCollection services,
-            Type serviceType,
-            Func<IServiceProvider, object> implementationFactory)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return Add(services, serviceType, implementationFactory, ServiceLifetime.Singleton);
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <typeparamref name="TService"/> with an
-        /// implementation type specified in <typeparamref name="TImplementation"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            return services.AddSingleton(typeof(TService), typeof(TImplementation));
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <paramref name="serviceType"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register and the implementation to use.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton(
-            this IServiceCollection services,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type serviceType)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            return services.AddSingleton(serviceType, serviceType);
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <typeparamref name="TService"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(this IServiceCollection services)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            return services.AddSingleton(typeof(TService));
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <typeparamref name="TService"/> with a
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton<TService>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TService> implementationFactory)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return services.AddSingleton(typeof(TService), implementationFactory);
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <typeparamref name="TService"/> with an
-        /// implementation type specified in <typeparamref name="TImplementation" /> using the
-        /// factory specified in <paramref name="implementationFactory"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <typeparam name="TService">The type of the service to add.</typeparam>
-        /// <typeparam name="TImplementation">The type of the implementation to use.</typeparam>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationFactory">The factory that creates the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton<TService, TImplementation>(
-            this IServiceCollection services,
-            Func<IServiceProvider, TImplementation> implementationFactory)
-            where TService : class
-            where TImplementation : class, TService
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationFactory == null)
-            {
-                throw new ArgumentNullException(nameof(implementationFactory));
-            }
-
-            return services.AddSingleton(typeof(TService), implementationFactory);
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <paramref name="serviceType"/> with an
-        /// instance specified in <paramref name="implementationInstance"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="serviceType">The type of the service to register.</param>
-        /// <param name="implementationInstance">The instance of the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton(
-            this IServiceCollection services,
-            Type serviceType,
-            object implementationInstance)
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (serviceType == null)
-            {
-                throw new ArgumentNullException(nameof(serviceType));
-            }
-
-            if (implementationInstance == null)
-            {
-                throw new ArgumentNullException(nameof(implementationInstance));
-            }
-
-            var serviceDescriptor = new ServiceDescriptor(serviceType, implementationInstance);
-            services.Add(serviceDescriptor);
-            return services;
-        }
-
-        /// <summary>
-        /// Adds a singleton service of the type specified in <typeparamref name="TService" /> with an
-        /// instance specified in <paramref name="implementationInstance"/> to the
-        /// specified <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="services">The <see cref="IServiceCollection"/> to add the service to.</param>
-        /// <param name="implementationInstance">The instance of the service.</param>
-        /// <returns>A reference to this instance after the operation has completed.</returns>
-        /// <seealso cref="ServiceLifetime.Singleton"/>
-        public static IServiceCollection AddSingleton<TService>(
-            this IServiceCollection services,
-            TService implementationInstance)
-            where TService : class
-        {
-            if (services == null)
-            {
-                throw new ArgumentNullException(nameof(services));
-            }
-
-            if (implementationInstance == null)
-            {
-                throw new ArgumentNullException(nameof(implementationInstance));
-            }
-
-            return services.AddSingleton(typeof(TService), implementationInstance);
-        }
-
-        private static IServiceCollection Add(
-            IServiceCollection collection,
-            Type serviceType,
-            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType,
-            ServiceLifetime lifetime)
-        {
-            var descriptor = new ServiceDescriptor(serviceType, implementationType, lifetime);
-            collection.Add(descriptor);
-            return collection;
-        }
-
-        private static IServiceCollection Add(
-            IServiceCollection collection,
-            Type serviceType,
-            Func<IServiceProvider, object> implementationFactory,
-            ServiceLifetime lifetime)
-        {
-            var descriptor = new ServiceDescriptor(serviceType, implementationFactory, lifetime);
-            collection.Add(descriptor);
-            return collection;
-        }
+        var descriptor = new ServiceDescriptor(
+            serviceType, 
+            implementationType, 
+            lifetime);
+        collection.Add(descriptor);
+        return collection;
     }
+    
+    // by impl factory (func)
+    private static IServiceCollection Add(
+        IServiceCollection collection,
+        Type serviceType,
+        Func<IServiceProvider, object> implementationFactory,
+        ServiceLifetime lifetime)
+    {
+        var descriptor = new ServiceDescriptor(
+            serviceType, 
+            implementationFactory, 
+            lifetime);
+        collection.Add(descriptor);
+        return collection;
+    }
+}
+
 ```
 
+###### 2.2.4.1 add transient
 
+```c#
+public static class ServiceCollectionServiceExtensions
+{
+    /* by service type*/
+    
+    public static IServiceCollection AddTransient(
+        this IServiceCollection services,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type serviceType)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }
+        
+        return services.AddTransient(
+            serviceType, 
+            serviceType);
+    }
+    
+    public static IServiceCollection AddTransient<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TService>(
+        this IServiceCollection services)
+            where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        return services.AddTransient(typeof(TService));
+    }
+    
+    /* by impl type */
+    
+    public static IServiceCollection AddTransient(
+        this IServiceCollection services,
+        Type serviceType,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }        
+        if (implementationType == null)
+        {
+            throw new ArgumentNullException(nameof(implementationType));
+        }
+        
+        return Add(
+            services, 
+            serviceType, 
+            implementationType, 
+            ServiceLifetime.Transient);    
+    }
+    
+    public static IServiceCollection AddTransient<
+        TService, 
+    	[DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TImplementation>(
+        this IServiceCollection services)
+            where TService : class
+            where TImplementation : class, TService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        return services.AddTransient(
+            typeof(TService), 
+            typeof(TImplementation));
+    }
+    
+    /* by impl factory */
+    
+    public static IServiceCollection AddTransient(
+        this IServiceCollection services,
+        Type serviceType,
+        Func<IServiceProvider, object> implementationFactory)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return Add(
+            services, 
+            serviceType, 
+            implementationFactory, 
+            ServiceLifetime.Transient);
+    }
+        
+    public static IServiceCollection AddTransient<TService>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TService> implementationFactory)
+        	where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }                
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+                
+        return services.AddTransient(
+            typeof(TService), 
+            implementationFactory);
+    }
+        
+    public static IServiceCollection AddTransient<TService, TImplementation>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TImplementation> implementationFactory)
+            where TService : class
+            where TImplementation : class, TService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+
+        return services.AddTransient(
+            typeof(TService), 
+            implementationFactory);
+    }           
+}
+
+```
+
+###### 2.2.4.2 add scoped
+
+```c#
+public static class ServiceCollectionServiceExtensions
+{
+    /* by service type */
+    
+    public static IServiceCollection AddScoped(
+        this IServiceCollection services,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type serviceType)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }
+        
+        return services.AddScoped(
+            serviceType, 
+            serviceType);
+    }
+    
+    public static IServiceCollection AddScoped<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TService>(
+        this IServiceCollection services)            
+        	where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        
+        return services.AddScoped(typeof(TService));
+    }
+    
+    /* by impl type */
+    
+    public static IServiceCollection AddScoped(
+        this IServiceCollection services,
+        Type serviceType,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }        
+        if (implementationType == null)
+        {
+            throw new ArgumentNullException(nameof(implementationType));
+        }
+        
+        return Add(
+            services, 
+            serviceType, 
+            implementationType, 
+            ServiceLifetime.Scoped);
+    }
+    
+    public static IServiceCollection AddScoped<
+        TService, 
+    	[DynamicallyAccessedMembers(
+        	DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TImplementation>(
+        this IServiceCollection services)            
+            where TService : class            
+            where TImplementation : class, TService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        
+        return services.AddScoped(
+            typeof(TService), 
+            typeof(TImplementation));
+    }
+    
+    /* by impl factory */
+                
+    public static IServiceCollection AddScoped(
+        this IServiceCollection services,
+        Type serviceType,
+        Func<IServiceProvider, object> implementationFactory)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return Add(
+            services, 
+            serviceType, 
+            implementationFactory, 
+            ServiceLifetime.Scoped);
+    }
+                                           
+    public static IServiceCollection AddScoped<TService>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TService> implementationFactory)            
+        	where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return services.AddScoped(
+            typeof(TService), 
+            implementationFactory);
+    }
+        
+    public static IServiceCollection AddScoped<TService, TImplementation>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TImplementation> implementationFactory)        
+        	where TService : class            
+            where TImplementation : class, TService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return services.AddScoped(
+            typeof(TService), 
+            implementationFactory);
+    }
+}
+
+```
+
+###### 2.2.4.3 add singleton
+
+```c#
+public static class ServiceCollectionServiceExtensions
+{
+    /* by service type */
+    
+    public static IServiceCollection AddSingleton(
+        this IServiceCollection services,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type serviceType)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }
+        
+        return services.AddSingleton(
+            serviceType, 
+            serviceType);
+    }
+        
+    public static IServiceCollection AddSingleton<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TService>(
+        this IServiceCollection services)            
+        	where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        
+        return services.AddSingleton(typeof(TService));
+    }
+    
+    /* by impl type */
+    
+    public static IServiceCollection AddSingleton(
+        this IServiceCollection services,
+        Type serviceType,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }        
+        if (implementationType == null)
+        {
+            throw new ArgumentNullException(nameof(implementationType));
+        }
+        
+        return Add(
+            services, 
+            serviceType, 
+            implementationType, 
+            ServiceLifetime.Singleton);
+    }
+    
+    public static IServiceCollection AddSingleton<
+        TService, 
+    	[DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TImplementation>(
+        this IServiceCollection services)            
+            where TService : class            
+            where TImplementation : class, TService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        
+        return services.AddSingleton(
+            typeof(TService), 
+            typeof(TImplementation));
+    }
+    
+    /* by impl factory */
+    
+    public static IServiceCollection AddSingleton(
+        this IServiceCollection services,
+        Type serviceType,
+        Func<IServiceProvider, object> implementationFactory)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return Add(
+            services, 
+            serviceType, 
+            implementationFactory, 
+            ServiceLifetime.Singleton);
+    }
+                                                        
+    public static IServiceCollection AddSingleton<TService>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TService> implementationFactory)            
+        	where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return services.AddSingleton(
+            typeof(TService), 
+            implementationFactory);
+    }
+        
+    public static IServiceCollection AddSingleton<TService, TImplementation>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TImplementation> implementationFactory)        
+        	where TService : class            
+            where TImplementation : class, TService
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        return services.AddSingleton(
+            typeof(TService), 
+            implementationFactory);
+    }
+    
+    
+    public static IServiceCollection AddSingleton(
+        this IServiceCollection services,
+        Type serviceType,
+        object implementationInstance)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }
+        
+        if (implementationInstance == null)
+        {
+            throw new ArgumentNullException(nameof(implementationInstance));
+        }
+        
+        var serviceDescriptor = new ServiceDescriptor(
+            serviceType, 
+            implementationInstance);
+        services.Add(serviceDescriptor);
+        
+        return services;
+    }
+    
+    /* by impl instance */
+    
+    public static IServiceCollection AddSingleton<TService>(
+        this IServiceCollection services,
+        TService implementationInstance)            
+        	where TService : class
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }        
+        if (implementationInstance == null)
+        {
+            throw new ArgumentNullException(nameof(implementationInstance));
+        }
+        
+        return services.AddSingleton(
+            typeof(TService), 
+            implementationInstance);
+    }
+}
+
+```
+
+###### 2.2.4.4 try add transient
+
+```c#
+public static class ServiceCollectionDescriptorExtensions
+{
+    /* by service_type */
+    
+     public static void TryAddTransient(
+        this IServiceCollection collection,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type service)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }
+        
+        var descriptor = ServiceDescriptor.Transient(
+            service, 
+            service);         
+        TryAdd(collection, descriptor);
+    }
+    
+    public static void TryAddTransient
+        <[DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TService>(
+        this IServiceCollection collection)        
+        	where TService : class
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+        
+        TryAddTransient(
+            collection, 
+            typeof(TService), 
+            typeof(TService));
+    }        
+                
+    /* by service_type & impl_type */
+    
+    public static void TryAddTransient(
+        this IServiceCollection collection,
+        Type service,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }        
+        if (implementationType == null)
+        {
+            throw new ArgumentNullException(nameof(implementationType));
+        }
+        
+        var descriptor = ServiceDescriptor.Transient(
+            service, 
+            implementationType);        
+        TryAdd(collection, descriptor);
+    }               
+    
+    public static void TryAddTransient
+        <TService, 
+    	 [DynamicallyAccessedMembers(
+             DynamicallyAccessedMemberTypes
+             	.PublicConstructors)] TImplementation>(
+        this IServiceCollection collection)            
+        	where TService : class            
+            where TImplementation : class, TService
+	{
+    	if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+             
+        TryAddTransient(
+            collection, 
+            typeof(TService), 
+            typeof(TImplementation));
+    } 
+    
+    /* by impl factory */
+    
+    public static void TryAddTransient(
+        this IServiceCollection collection,
+        Type service,
+        Func<IServiceProvider, object> implementationFactory)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }
+        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        var descriptor = ServiceDescriptor.Transient(
+            service, 
+            implementationFactory);
+        TryAdd(collection, descriptor);
+    }
+        
+    public static void TryAddTransient<TService>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TService> implementationFactory)
+        	where TService : class
+    {
+        services.TryAdd(
+            ServiceDescriptor.Transient(implementationFactory));
+    }
+}
+
+```
+
+###### 2.2.4.5 try add scoped
+
+```c#
+public static class ServiceCollectionDescriptorExtensions
+{
+    /* by service type */
+    
+    public static void TryAddScoped(
+        this IServiceCollection collection,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type service)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }
+        
+        var descriptor = ServiceDescriptor.Scoped(
+            service, 
+            service);        
+        TryAdd(collection, descriptor);
+    }
+
+    public static void TryAddScoped<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TService>(
+        this IServiceCollection collection)            
+        	where TService : class
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+        
+        TryAddScoped(
+            collection, 
+            typeof(TService), 
+            typeof(TService));
+    }
+    
+    /* by implementation type */
+    
+    public static void TryAddScoped(
+        this IServiceCollection collection,
+        Type service,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }        
+        if (implementationType == null)
+        {
+            throw new ArgumentNullException(nameof(implementationType));
+        }
+        
+        var descriptor = ServiceDescriptor.Scoped(
+            service, 
+            implementationType);
+        TryAdd(collection, descriptor);
+    }
+    
+    public static void TryAddScoped<
+        TService, 
+    	DynamicallyAccessedMembers(
+        	DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TImplementation>(
+        this IServiceCollection collection)
+            where TService : class
+            where TImplementation : class, TService
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+                
+        TryAddScoped(
+            collection, 
+            typeof(TService), 
+            typeof(TImplementation));
+    }
+
+    /* by impl type and impl factory */
+    
+    public static void TryAddScoped(
+        this IServiceCollection collection,
+        Type service,
+        Func<IServiceProvider, object> implementationFactory)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        var descriptor = ServiceDescriptor.Scoped(
+            service, 
+            implementationFactory);
+        TryAdd(collection, descriptor);
+    }
+                            
+    public static void TryAddScoped<TService>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TService> implementationFactory)
+        	where TService : class
+    {
+        services.TryAdd(
+            ServiceDescriptor.Scoped(implementationFactory));
+    }
+}
+
+```
+
+###### 2.2.3.5 try add singleton 
+
+```c#
+public static class ServiceCollectionDescriptorExtensions
+{
+    /* by service type */
+    
+    public static void TryAddSingleton(
+        this IServiceCollection collection,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type service)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }
+        
+        var descriptor = ServiceDescriptor.Singleton(
+            service, 
+            service);
+        TryAdd(collection, descriptor);
+    }
+    
+    public static void TryAddSingleton<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TService>(
+        this IServiceCollection collection)
+            where TService : class
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+                
+        TryAddSingleton(
+            collection, 
+            typeof(TService), 
+            typeof(TService));
+    }
+    
+    /* by impl type */
+    
+    public static void TryAddSingleton(
+        this IServiceCollection collection,
+        Type service,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type implementationType)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }        
+        if (implementationType == null)
+        {
+            throw new ArgumentNullException(nameof(implementationType));
+        }
+        
+        var descriptor = ServiceDescriptor.Singleton(
+            service, 
+            implementationType);
+        TryAdd(collection, descriptor);
+    }
+    
+    public static void TryAddSingleton<
+        TService, 
+    	[DynamicallyAccessedMembers(
+        	DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] TImplementation>(
+        this IServiceCollection collection)
+            where TService : class
+            where TImplementation : class, TService
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }
+                
+        TryAddSingleton(
+            collection, 
+            typeof(TService), 
+            typeof(TImplementation));
+    }
+    
+    /* by impl type factory */
+    
+    public static void TryAddSingleton(
+        this IServiceCollection collection,
+        Type service,
+        Func<IServiceProvider, object> implementationFactory)
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }        
+        if (service == null)
+        {
+            throw new ArgumentNullException(nameof(service));
+        }        
+        if (implementationFactory == null)
+        {
+            throw new ArgumentNullException(nameof(implementationFactory));
+        }
+        
+        var descriptor = ServiceDescriptor.Singleton(
+            service, 
+            implementationFactory);
+        TryAdd(collection, descriptor);
+    }
+    
+    public static void TryAddSingleton<TService>(
+        this IServiceCollection services,
+        Func<IServiceProvider, TService> implementationFactory)
+        	where TService : class
+    {
+        services.TryAdd(
+            ServiceDescriptor.Singleton(implementationFactory));
+    }
+    
+    /* by impl instance */
+        
+    public static void TryAddSingleton<TService>(
+        this IServiceCollection collection, 
+        TService instance)
+            where TService : class
+    {
+        if (collection == null)
+        {
+            throw new ArgumentNullException(nameof(collection));
+        }                
+        if (instance == null)
+        {
+            throw new ArgumentNullException(nameof(instance));
+        }
+                
+        var descriptor = ServiceDescriptor.Singleton(
+            typeof(TService), 
+            instance);
+        TryAdd(collection, descriptor);
+    }            
+}
+
+```
 
 #### 2.3 service provider
 
@@ -1953,6 +2049,8 @@ public interface IServiceProvider
 ```
 
 ##### 2.3.2 实现
+
+* ms（默认）实现
 
 ```c#
 public sealed class ServiceProvider 
@@ -2007,10 +2105,12 @@ public sealed class ServiceProvider
         }
     }
         
-    // 实现 IServiceProvider 的 get service 方法
+    /* 实现 IServiceProvider 的 get service 方法 */
+          
     public object GetService(Type serviceType) => _engine.GetService(serviceType);
       
     /* 实现 IServiceProviderFacotry 的方法 */
+          
     void IServiceProviderEngineCallback.OnCreate(
         ServiceCallSite callSite)
     {
@@ -2028,6 +2128,7 @@ public sealed class ServiceProvider
     }
         
     /* dispose */
+          
     public void Dispose()
     {
         _engine.Dispose();
@@ -2041,7 +2142,11 @@ public sealed class ServiceProvider
 
 ```
 
-##### 2.3.3 service provider options
+##### 2.3.3 组件
+
+###### 2.3.3.1 service provider options
+
+* 单例
 
 ```c#
 public class ServiceProviderOptions
@@ -2053,14 +2158,14 @@ public class ServiceProviderOptions
 
 ```
 
-##### 2.3.4 service provider engine
+###### 2.3.3.2 service provider engine
 
 * service 解析引擎，
 * 递归解析
 
-##### 2.3.5 service provider factory
+##### 2.3.4 service provider factory
 
-###### 2.3.5.1 接口
+###### 2.3.4.1 接口
 
 ```c#
 public interface IServiceProviderFactory<TContainerBuilder> 
@@ -2072,14 +2177,19 @@ public interface IServiceProviderFactory<TContainerBuilder>
 
 ```
 
-###### 2.3.5.2 实现
+###### 2.3.4.2 ms 默认实现
+
+* 使用`IServiceCollection`作为`TContainerBuilder`
+* 调用 service collection 的扩展方法
+  * 创建 service provider engine
+  * 用 service provider engine 构建 service provider
 
 ```c#
 public class DefaultServiceProviderFactory 
     : IServiceProviderFactory<IServiceCollection>
 {
-    private readonly ServiceProviderOptions _options;
-       
+    private readonly ServiceProviderOptions _options;   
+        
     public DefaultServiceProviderFactory() : this(ServiceProviderOptions.Default)
     {        
     }
@@ -2107,7 +2217,9 @@ public class DefaultServiceProviderFactory
 
 ```
 
-###### 2.3.5.3 build service provider
+###### 2.3.4.3 扩展 service collection 构建 service provider
+
+* 真正构建 service provider 的方法
 
 ```c#
 public static class ServiceCollectionContainerBuilderExtensions
@@ -2148,26 +2260,36 @@ public static class ServiceCollectionContainerBuilderExtensions
 #if !NETCOREAPP
     	engine = new DynamicServiceProviderEngine(services);
 #else
-       if (RuntimeFeature.IsDynamicCodeCompiled)
-       {
-           engine = new DynamicServiceProviderEngine(services);
-       }
+        if (RuntimeFeature.IsDynamicCodeCompiled)
+        {
+            engine = new DynamicServiceProviderEngine(services);
+        }
         else
         {
             // Don't try to compile Expressions/IL if they are going to get interpreted
             engine = new RuntimeServiceProviderEngine(services);
         }
 #endif
-        // 创建 service provider 并返回
+        // 创建 ms service provider 并返回
         return new ServiceProvider(services, engine, options);
-     }
- }
+    }
+}
 
 ```
 
 ##### 2.3.6 解析 service 的扩展方法
 
-###### 2.3.6.1 get required service
+###### 2.3.6.1 support required service 接口
+
+```c#
+public interface ISupportRequiredService
+{    
+    object GetRequiredService(Type serviceType);
+}
+
+```
+
+###### 2.3.6.2 get required service
 
 ```c#
 public static class ServiceProviderServiceExtensions
@@ -2185,9 +2307,13 @@ public static class ServiceProviderServiceExtensions
             throw new ArgumentNullException(nameof(serviceType));
         }
         
-        if (provider is ISupportRequiredService requiredServiceSupportingProvider)
+        // 如果实现了 ISupportRequiredService 接口，
+        // 直接调用 ISupportRequiredService 对应方法
+        if (provider is ISupportRequiredService 
+            requiredServiceSupportingProvider)
         {
-            return requiredServiceSupportingProvider.GetRequiredService(serviceType);
+            return requiredServiceSupportingProvider
+                .GetRequiredService(serviceType);
         }
         
         object? service = provider.GetService(serviceType);
@@ -2201,9 +2327,10 @@ public static class ServiceProviderServiceExtensions
         return service;
     }
 }
+
 ```
 
-###### 2.3.6.2 get T
+###### 2.3.6.2 get T service
 
 ```c#
 public static class ServiceProviderServiceExtensions
@@ -2234,7 +2361,9 @@ public static class ServiceProviderServiceExtensions
 
 ```
 
-###### 2.3.6.3 get services
+###### 2.3.6.3 get  enumerable services
+
+* 将 TService 转化为 IEnumberable<T> 解析
 
 ```c#
 public static class ServiceProviderServiceExtensions
@@ -2337,9 +2466,7 @@ internal class ServiceProviderEngineScope :
         
         return Engine.GetService(serviceType, this);
     }
-    
-    
-    
+            
     internal object CaptureDisposable(object service)
     {
         _captureDisposableCallback?.Invoke(service);
@@ -2501,10 +2628,10 @@ internal class ServiceProviderEngineScope :
 
 ```c#
 public interface IServiceScopeFactory
-    {
-        
-        IServiceScope CreateScope();
-    }
+{    
+    IServiceScope CreateScope();
+}
+
 ```
 
 ###### 2.4.3.2 实现
@@ -2531,11 +2658,1013 @@ internal abstract class ServiceProviderEngine :
 
 ```
 
+#### 2.5 service provider engine
+
+##### 2.5.1 接口
+
+```c#
+internal interface IServiceProviderEngine : 
+	IServiceProvider, 
+	IDisposable, 
+	IAsyncDisposable
+{
+    IServiceScope RootScope { get; }
+    void InitializeCallback(IServiceProviderEngineCallback callback);
+    void ValidateService(ServiceDescriptor descriptor);
+}
+
+```
+
+##### 2.5.2 service provider engine
+
+```c#
+internal abstract class ServiceProviderEngine : 
+	IServiceProviderEngine, 
+	IServiceScopeFactory
+{
+    private bool _disposed;
+        
+    private IServiceProviderEngineCallback _callback;   
+        
+    private readonly Func<Type, Func<ServiceProviderEngineScope, object>> 
+        _createServiceAccessor;               
+    internal ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object>> 
+        RealizedServices { get; }
+    
+    internal CallSiteFactory CallSiteFactory { get; }    
+    protected CallSiteRuntimeResolver RuntimeResolver { get; }
+    
+    public ServiceProviderEngineScope Root { get; }    
+    public IServiceScope RootScope => Root;
+    
+    // ...  
+}
+
+```
+
+###### 2.5.2.1 构造函数和组件
+
+```c#
+internal abstract class ServiceProviderEngine 
+{
+    protected ServiceProviderEngine(
+        IEnumerable<ServiceDescriptor> serviceDescriptors)
+    {
+        // 创建 service accessor
+        _createServiceAccessor = CreateServiceAccessor;
+        // 创建 engine scope
+        Root = new ServiceProviderEngineScope(this);
+        // 创建 callsite runtime resolver
+        RuntimeResolver = new CallSiteRuntimeResolver();
+        
+        /* 创建 callsite factory，
+           注册 serviceprovider，
+           注册 service scope factory */
+        CallSiteFactory = new CallSiteFactory(serviceDescriptors);
+        CallSiteFactory.Add(
+            typeof(IServiceProvider), 
+            new ServiceProviderCallSite());
+        CallSiteFactory.Add(
+            typeof(IServiceScopeFactory), 
+            new ServiceScopeFactoryCallSite());
+        
+        // 创建 realized services
+        RealizedServices = new ConcurrentDictionary<
+            Type, 
+        	Func<ServiceProviderEngineScope, object>>();
+    }
+        
+    // 创建 service accessor，
+    // 在 service provider callback 中注册 service_type 的 callsite
+    private Func<ServiceProviderEngineScope, object> 
+        CreateServiceAccessor(Type serviceType)
+    {
+        ServiceCallSite callSite = CallSiteFactory.GetCallSite(
+            serviceType, 
+            new CallSiteChain());
+        
+        if (callSite != null)
+        {
+            DependencyInjectionEventSource
+                .Log
+                .CallSiteBuilt(serviceType, callSite);
+            
+            _callback?.OnCreate(callSite);
+            return RealizeService(callSite);
+        }
+        
+        return _ => null;
+    }    
+        
+    // 从 scope 解析 service object 的方法，
+    // 由派生类实现
+    protected abstract Func<ServiceProviderEngineScope, object> RealizeService(
+        ServiceCallSite callSite);
+                                      
+    void IServiceProviderEngine.InitializeCallback(
+        IServiceProviderEngineCallback callback)
+    {
+        _callback = callback;
+    }       
+}
+
+```
+
+###### 2.5.2.2 validate
+
+```c#
+internal abstract class ServiceProviderEngine 
+{
+    public void ValidateService(ServiceDescriptor descriptor)
+    {
+        if (descriptor.ServiceType.IsGenericType && 
+            !descriptor.ServiceType.IsConstructedGenericType)
+        {
+            return;
+        }
+        
+        try
+        {
+            ServiceCallSite callSite = CallSiteFactory.GetCallSite(
+                descriptor, 
+                new CallSiteChain());
+            
+            if (callSite != null)
+            {
+                _callback?.OnCreate(callSite);
+            }
+        }
+        catch (Exception e)
+        {
+            throw new InvalidOperationException(
+                $"Error while validating the service descriptor 
+                '{descriptor}': {e.Message}", 
+                e);
+        }
+    }
+}
+
+```
+
+###### 2.5.2.3 get service
+
+```c#
+internal abstract class ServiceProviderEngine 
+{
+    public object GetService(Type serviceType) => GetService(serviceType, Root);
+        
+    internal object GetService(
+        Type serviceType, 
+        ServiceProviderEngineScope serviceProviderEngineScope)
+    {
+        if (_disposed)
+        {
+            ThrowHelper.ThrowObjectDisposedException();
+        }
+        
+        Func<ServiceProviderEngineScope, object> realizedService = 
+            RealizedServices.GetOrAdd(
+            	serviceType, 
+            	_createServiceAccessor);
+        
+        _callback?.OnResolve(
+            serviceType, 
+            serviceProviderEngineScope);
+        
+        DependencyInjectionEventSource.Log.ServiceResolved(serviceType);
+        
+        return realizedService.Invoke(serviceProviderEngineScope);
+    }    
+}
+
+```
+
+###### 2.5.2.4 create scope
+
+```c#
+internal abstract class ServiceProviderEngine 
+{
+    public IServiceScope CreateScope()
+    {
+        if (_disposed)
+        {
+            ThrowHelper.ThrowObjectDisposedException();
+        }
+        
+        return new ServiceProviderEngineScope(this);
+    }           
+}
+
+```
+
+###### 2.5.2.5 dispose
+
+```c#
+internal abstract class ServiceProviderEngine 
+{
+    public void Dispose()
+    {
+        _disposed = true;
+        Root.Dispose();
+    }
+    
+    public ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        return Root.DisposeAsync();
+    }    
+}
+
+```
+
+##### 2.5.3 runtime service provider engine
+
+```c#
+internal class RuntimeServiceProviderEngine : ServiceProviderEngine
+{
+    public RuntimeServiceProviderEngine(
+        IEnumerable<ServiceDescriptor> serviceDescriptors) : 
+    		base(serviceDescriptors)
+    {
+    }
+
+    protected override Func<ServiceProviderEngineScope, object> 
+        RealizeService(ServiceCallSite callSite)
+    {
+        return scope =>
+        {
+            Func<ServiceProviderEngineScope, object> realizedService = p => 
+                RuntimeResolver.Resolve(callSite, p);
+            
+            RealizedServices[callSite.ServiceType] = realizedService;
+
+            return realizedService(scope);
+        };
+    }
+}
+
+```
+
+##### 2.5.4 compiled service provider engine
+
+```c#
+internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
+{
+#if IL_EMIT
+    public ILEmitResolverBuilder ResolverBuilder { get; }
+#else
+    public ExpressionResolverBuilder ResolverBuilder { get; }
+#endif
+    
+    public CompiledServiceProviderEngine(
+    	IEnumerable<ServiceDescriptor> serviceDescriptors) : 
+    		base(serviceDescriptors)
+    {
+#if IL_EMIT
+        ResolverBuilder = new ILEmitResolverBuilder(RuntimeResolver, this, Root);
+#else
+        ResolverBuilder = new ExpressionResolverBuilder(RuntimeResolver, this, Root);
+#endif
+    }
+
+    protected override Func<ServiceProviderEngineScope, object> 
+        RealizeService(ServiceCallSite callSite)
+    {
+        Func<ServiceProviderEngineScope, object> realizedService = 
+            ResolverBuilder.Build(callSite);
+        
+        RealizedServices[callSite.ServiceType] = realizedService;
+        
+        return realizedService;
+    }
+}
+
+```
+
+##### 2.5.5 dynamic service provider engine
+
+```c#
+internal class DynamicServiceProviderEngine : CompiledServiceProviderEngine
+{
+    public DynamicServiceProviderEngine(
+        IEnumerable<ServiceDescriptor> serviceDescriptors) : 
+    		base(serviceDescriptors)
+    {
+    }
+    
+    protected override Func<ServiceProviderEngineScope, object> 
+        RealizeService(ServiceCallSite callSite)
+    {
+        int callCount = 0;
+        return scope =>
+        {
+            // Resolve the result before we increment the call count, 
+            // this ensures that singletons won't cause any 
+            // side effects during the compilation of the resolve function.
+            var result = RuntimeResolver.Resolve(callSite, scope);
+            
+            if (Interlocked.Increment(ref callCount) == 2)
+            {
+                // Don't capture the ExecutionContext when 
+                // forking to build the compiled version of the resolve function
+                ThreadPool.UnsafeQueueUserWorkItem(
+                    state =>
+                    {
+                        try
+                        {
+                            base.RealizeService(callSite);
+                        }
+                        catch
+                        {
+                            // Swallow the exception, 
+                            // we should log this via the event source in a non-patched release
+                        }
+                    },
+                    null);
+            }
+            
+            return result;
+        };
+    }
+}
+
+```
+
+#### 2.6 activator utilities
+
+##### 2.6.1 activator utilities
+
+```c#
+public static class ActivatorUtilities
+{
+    private static readonly MethodInfo GetServiceInfo =
+        GetMethodInfo<Func<IServiceProvider, Type, Type, bool, object?>>((sp, t, r, c) => 
+        	GetService(sp, t, r, c));
+    
+    
+    private static object? GetService(
+        IServiceProvider sp, 
+        Type type, 
+        Type requiredBy, 
+        bool isDefaultParameterRequired)
+    {
+        object? service = sp.GetService(type);
+        if (service == null && !isDefaultParameterRequired)
+        {
+            string? message = 
+                $"Unable to resolve service for type '{type}' 
+                "while attempting to activate '{requiredBy}'.";
+            throw new InvalidOperationException(message);
+        }
+        return service;
+    }
+                                                                        
+    
+    private static MethodInfo GetMethodInfo<T>(Expression<T> expr)
+    {
+        var mc = (MethodCallExpression)expr.Body;
+        return mc.Method;
+    }
+                                        
+    private static void ThrowMultipleCtorsMarkedWithAttributeException()
+    {
+        throw new InvalidOperationException(
+            $"Multiple constructors were marked with 
+            "{nameof(ActivatorUtilitiesConstructorAttribute)}.");
+    }
+    
+    private static void ThrowMarkedCtorDoesNotTakeAllProvidedArguments()
+    {
+        throw new InvalidOperationException(
+            $"Constructor marked with 
+            "{nameof(ActivatorUtilitiesConstructorAttribute)} 
+            'does not accept all given argument types.");
+    }
+}
+
+```
+
+##### 2.6.1 create instance
+
+###### 2.6.1.1 constructor matcher
+
+```c#
+public static class ActivatorUtilities
+{
+    private struct ConstructorMatcher
+    {
+        private readonly ConstructorInfo _constructor;
+        private readonly ParameterInfo[] _parameters;
+        private readonly object?[] _parameterValues;
+        
+        // 注入 constructor_info，
+        // 从中解析 parameter_type 和 parameter_value
+        public ConstructorMatcher(ConstructorInfo constructor)
+        {
+            _constructor = constructor;
+            _parameters = _constructor.GetParameters();
+            _parameterValues = new object?[_parameters.Length];
+        }
+        
+        public int Match(object[] givenParameters)
+        {
+            int applyIndexStart = 0;
+            int applyExactLength = 0;
+            for (int givenIndex = 0; 
+                 givenIndex != givenParameters.Length; 
+                 givenIndex++)
+            {
+                Type? givenType = givenParameters[givenIndex]?.GetType();
+                bool givenMatched = false;
+                
+                for (int applyIndex = applyIndexStart; 
+                     givenMatched == false && applyIndex != _parameters.Length; 
+                     ++applyIndex)
+                {
+                    if (_parameterValues[applyIndex] == null &&
+                        _parameters[applyIndex]
+                        	.ParameterType.IsAssignableFrom(givenType))
+                    {
+                        givenMatched = true;
+                        _parameterValues[applyIndex] = givenParameters[givenIndex];
+                        if (applyIndexStart == applyIndex)
+                        {
+                            applyIndexStart++;
+                            if (applyIndex == givenIndex)
+                            {
+                                applyExactLength = applyIndex;
+                            }
+                        }
+                    }
+                }
+                
+                if (givenMatched == false)
+                {
+                    return -1;
+                }
+            }
+            
+            return applyExactLength;
+        }
+        
+        public object CreateInstance(IServiceProvider provider)
+        {
+            for (int index = 0; index != _parameters.Length; index++)
+            {
+                if (_parameterValues[index] == null)
+                {
+                    object? value = provider.GetService(
+                        _parameters[index].ParameterType);
+                    if (value == null)
+                    {
+                        if (!ParameterDefaultValue.TryGetDefaultValue(
+                            	_parameters[index], 
+                            	out object? defaultValue))
+                        {
+                            throw new InvalidOperationException(
+                                $"Unable to resolve service for type
+                                '{_parameters[index].ParameterType}' 
+                                'while attempting to activate 
+                                '{_constructor.DeclaringType}'.");
+                        }
+                        else
+                        {
+                            _parameterValues[index] = defaultValue;
+                        }
+                    }
+                    else
+                    {
+                        _parameterValues[index] = value;
+                    }
+                }
+            }
+            
+#if NETCOREAPP
+    		return _constructor.Invoke(
+                BindingFlags.DoNotWrapExceptions, 
+                binder: null, 
+                parameters: _parameterValues, 
+                culture: null);
+#else
+            try
+            {
+                return _constructor.Invoke(_parameterValues);
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null)
+            {
+                ExceptionDispatchInfo
+                    .Capture(ex.InnerException)
+                    .Throw();
+                // The above line will always throw, 
+                // but the compiler requires we throw explicitly.
+                throw;
+            }
+#endif
+        }
+    }
+}
+
+```
+
+###### 2.6.1.2 create object
+
+```c#
+public static class ActivatorUtilities
+{
+    public static object CreateInstance(
+        IServiceProvider provider,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type instanceType,
+        params object[] parameters)
+    {
+        int bestLength = -1;
+        bool seenPreferred = false;
+        
+        ConstructorMatcher bestMatcher = default;
+        
+        if (!instanceType.IsAbstract)
+        {
+            foreach (ConstructorInfo? constructor in 
+                     instanceType.GetConstructors())
+            {
+                var matcher = new ConstructorMatcher(constructor);
+                bool isPreferred = constructor.IsDefined(
+                    typeof(ActivatorUtilitiesConstructorAttribute), 
+                    false);
+                int length = matcher.Match(parameters);
+                
+                if (isPreferred)
+                {
+                    if (seenPreferred)
+                    {
+                        ThrowMultipleCtorsMarkedWithAttributeException();
+                    }
+                    
+                    if (length == -1)
+                    {
+                        ThrowMarkedCtorDoesNotTakeAllProvidedArguments();
+                    }
+                }
+                
+                if (isPreferred || bestLength < length)
+                {
+                    bestLength = length;
+                    bestMatcher = matcher;
+                }
+                
+                seenPreferred |= isPreferred;
+            }
+        }
+        
+        if (bestLength == -1)
+        {
+            string? message = 
+                $"A suitable constructor for type '{instanceType}' 
+                'could not be located. Ensure the type is concrete 
+                'and all parameters of a public constructor 
+                'are either registered as services or passed as arguments. 
+                'Also ensure no extraneous arguments are provided.";
+            throw new InvalidOperationException(message);
+        }
+        
+        return bestMatcher.CreateInstance(provider);
+    }
+}
+
+```
+
+###### 2.6.1.3 create T
+
+```c#
+public static class ActivatorUtilities
+{
+    public static T CreateInstance<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] T>(
+        IServiceProvider provider, 
+        params object[] parameters)
+    {
+        return (T)CreateInstance(provider, typeof(T), parameters);
+    }
+}
+```
+
+###### 2.6.1.4 get or create
+
+```c#
+public static class ActivatorUtilities
+{
+    public static object GetServiceOrCreateInstance(
+        IServiceProvider provider,
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type type)
+    {
+        return provider.GetService(type) ?? CreateInstance(provider, type);
+    }
+    
+    public static T GetServiceOrCreateInstance<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] T>(IServiceProvider provider)
+    {
+        return (T)GetServiceOrCreateInstance(provider, typeof(T));
+    }                
+}
+
+```
+
+##### 2.6.2 create object factory
+
+###### 2.6.2.1 object factory
+
+```c#
+public delegate object ObjectFactory(
+     IServiceProvider serviceProvider, 
+     object?[]? arguments);
+     
+```
+
+###### 2.6.2.2 create factory
+
+```c#
+public static class ActivatorUtilities
+{
+    public static ObjectFactory CreateFactory(
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type instanceType,
+        Type[] argumentTypes)
+    {
+        /* 获取 constructor */
+        
+        FindApplicableConstructor(
+            instanceType, 
+            argumentTypes, 
+            out ConstructorInfo? constructor, 
+            out int?[]? parameterMap);
+        
+        /* 构建 expression */
+        
+        ParameterExpression? provider = Expression.Parameter(
+            typeof(IServiceProvider), 
+            "provider");
+        ParameterExpression? argumentArray = Expression.Parameter(
+            typeof(object[]), 
+            "argumentArray");
+        Expression? factoryExpressionBody = BuildFactoryExpression(
+            constructor, 
+            parameterMap, 
+            provider, 
+            argumentArray);
+        
+        var factoryLambda = Expression
+            .Lambda<Func<IServiceProvider, object[], object>>(
+            	factoryExpressionBody, 
+            	provider, 
+            	argumentArray);
+        
+        Func<IServiceProvider, object[], object>? result = factoryLambda.Compile();
+        
+        return result.Invoke;
+    }
+}
+
+```
+
+###### 2.6.2.3 find constructor
+
+```c#
+public static class ActivatorUtilities
+{
+    private static void FindApplicableConstructor(
+            [DynamicallyAccessedMembers(
+                DynamicallyAccessedMemberTypes
+                	.PublicConstructors)] Type instanceType,
+            Type[] argumentTypes,
+            out ConstructorInfo matchingConstructor,
+            out int?[] matchingParameterMap)
+    {
+        ConstructorInfo? constructorInfo = null;
+        int?[]? parameterMap = null;
+        
+        if (!TryFindPreferredConstructor(
+            	instanceType, 
+            	argumentTypes, 
+            	ref constructorInfo, 
+            	ref parameterMap) &&
+            !TryFindMatchingConstructor(
+                instanceType, 
+                argumentTypes, 
+                ref constructorInfo, 
+                ref parameterMap))
+        {
+            string? message = 
+                $"A suitable constructor for type '{instanceType}' 
+                'could not be located. Ensure the type is concrete 
+                'and all parameters of a public constructor are 
+                'either registered as services or passed as arguments. 
+                'Also ensure no extraneous arguments are provided.";
+            throw new InvalidOperationException(message);
+        }
+        
+        matchingConstructor = constructorInfo;
+        matchingParameterMap = parameterMap;
+    }
+}
+
+```
+
+###### 2.6.2.4 find preferred constructor
+
+```c#
+public static class ActivatorUtilities
+{
+    private static bool TryFindPreferredConstructor(
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type instanceType,
+        Type[] argumentTypes,
+        [NotNullWhen(true)] ref ConstructorInfo? matchingConstructor,
+        [NotNullWhen(true)] ref int?[]? parameterMap)
+    {
+        bool seenPreferred = false;
+        foreach (ConstructorInfo? constructor in 
+                 instanceType.GetConstructors())
+        {
+            if (constructor.IsDefined(
+                typeof(ActivatorUtilitiesConstructorAttribute), 
+                false))
+            {
+                if (seenPreferred)
+                {
+                    ThrowMultipleCtorsMarkedWithAttributeException();
+                }
+                
+                if (!TryCreateParameterMap(
+                    	constructor.GetParameters(), 
+                    	argumentTypes, 
+                    	out int?[] tempParameterMap))
+                {
+                    ThrowMarkedCtorDoesNotTakeAllProvidedArguments();
+                }
+                
+                matchingConstructor = constructor;
+                parameterMap = tempParameterMap;
+                seenPreferred = true;
+            }
+        }
+        
+        if (matchingConstructor != null)
+        {
+            Debug.Assert(parameterMap != null);
+            return true;
+        }
+        
+        return false;
+    }
+}
+
+```
+
+###### 2.6.2.4 find matching constructor
+
+```c#
+public static class ActivatorUtilities
+{
+    private static bool TryFindMatchingConstructor(
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicConstructors)] Type instanceType,
+        Type[] argumentTypes,
+        [NotNullWhen(true)] ref ConstructorInfo? matchingConstructor,
+        [NotNullWhen(true)] ref int?[]? parameterMap)
+    {
+        foreach (ConstructorInfo? constructor in 
+                 instanceType.GetConstructors())
+        {
+            if (TryCreateParameterMap(
+                	constructor.GetParameters(), 
+                	argumentTypes, 
+                	out int?[] tempParameterMap))
+            {
+                if (matchingConstructor != null)
+                {
+                    throw new InvalidOperationException(
+                        $"Multiple constructors accepting all given 
+                        "argument types have been found in type '{instanceType}'. 
+                        'There should only be one applicable constructor.");
+                }
+                
+                matchingConstructor = constructor;
+                parameterMap = tempParameterMap;
+            }
+        }
+        
+        if (matchingConstructor != null)
+        {
+            Debug.Assert(parameterMap != null);
+            return true;
+        }
+        
+        return false;
+    }
+}
+                        
+```
+
+###### 2.6.2.5 create parameter map
+
+```c#
+public static class ActivatorUtilities
+{
+    private static bool TryCreateParameterMap(
+        ParameterInfo[] constructorParameters, 
+        Type[] argumentTypes, 
+        out int?[] parameterMap)
+    {
+        parameterMap = new int?[constructorParameters.Length];
+        
+        for (int i = 0; i < argumentTypes.Length; i++)
+        {
+            bool foundMatch = false;
+            Type? givenParameter = argumentTypes[i];
+            
+            for (int j = 0; j < constructorParameters.Length; j++)
+            {
+                if (parameterMap[j] != null)
+                {
+                    // This ctor parameter has already been matched
+                    continue;
+                }
+                
+                if (constructorParameters[j]
+                    	.ParameterType
+                    	.IsAssignableFrom(givenParameter))
+                {
+                    foundMatch = true;
+                    parameterMap[j] = i;
+                    break;
+                }
+            }
+            
+            if (!foundMatch)
+            {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+}
+
+```
+
+###### 2.6.2.6 build factory expression
+
+```c#
+public static class ActivatorUtilities
+{
+    private static Expression BuildFactoryExpression(
+        ConstructorInfo constructor,
+        int?[] parameterMap,
+        Expression serviceProvider,
+        Expression factoryArgumentArray)
+    {
+        ParameterInfo[]? constructorParameters = constructor.GetParameters();
+        var constructorArguments = new Expression[constructorParameters.Length];
+        
+        for (int i = 0; i < constructorParameters.Length; i++)
+        {
+            ParameterInfo? constructorParameter = constructorParameters[i];
+            Type? parameterType = constructorParameter.ParameterType;
+            bool hasDefaultValue = ParameterDefaultValue.TryGetDefaultValue(
+                constructorParameter, 
+                out object? defaultValue);
+            
+            if (parameterMap[i] != null)
+            {
+                constructorArguments[i] = Expression.ArrayAccess(
+                    factoryArgumentArray, 
+                    Expression.Constant(parameterMap[i]));
+            }
+            else
+            {
+                var parameterTypeExpression = new Expression[] 
+                {
+                    serviceProvider,
+                    Expression.Constant(parameterType, typeof(Type)),
+                    Expression.Constant(constructor.DeclaringType, typeof(Type)),
+                    Expression.Constant(hasDefaultValue) 
+                };
+                
+                constructorArguments[i] = Expression.Call(
+                    GetServiceInfo, 
+                    parameterTypeExpression);
+            }
+            
+            // Support optional constructor arguments by passing in the default value
+            // when the argument would otherwise be null.
+            if (hasDefaultValue)
+            {
+                ConstantExpression? defaultValueExpression = 
+                    Expression.Constant(defaultValue);
+                constructorArguments[i] = Expression.Coalesce(
+                    constructorArguments[i], 
+                    defaultValueExpression);
+            }
+            
+            constructorArguments[i] = Expression.Convert(
+                constructorArguments[i], 
+                parameterType);
+        }
+        
+        return Expression.New(constructor, constructorArguments);
+    }
+}
+
+```
+
+##### 2.6.3 attribute
+
+```c#
+[AttributeUsage(AttributeTargets.All)]
+public class ActivatorUtilitiesConstructorAttribute : Attribute
+{
+}
+
+```
+
 ### 3. practice
 
-#### 3.1 创建 service collection
+#### 3.1 创建 service 容器（provider）
+
+##### 3.1.1 手动创建
+
+```c#
+var serviceCollection = new ServiceCollection();
+serviceCollection.Add(/* */);
+var serviceProvider = serviceCollection.BuildServiceProvider();
+
+```
+
+##### 3.1.2 by host framework
+
+```c#
+var hostBuilder = Host.CreateDefaultBuilder(args)
+    .ConfigureServices((_, services) =>
+                      services.Add(/**/));
+
+var host = hostBuilder.Build();
+    
+```
+
+* 框架自动注入服务（create default builder 方法中注册）
+  * 见 Host.CrearteDefaultBuilder()
+
+##### 3.1.3 第三方 service provider
+
+* 实现 IServiceProviderFactory 方法
 
 #### 3.2 注册服务
 
-#### 3.3 创建 service provider
+##### 3.2.1 Addxxx
+
+* 可以多次执行，
+* 不同的 impl type 保存在 enumerable impl type 集合中
+
+##### 3.2.2 TryAddXxx
+
+* 如果 service type 已经存在，不再注册 service (descriptor with impl type)
+
+##### 3.2.3 TryAddEnumerable
+
+* 如果 imple type 已经存在，不再注册 service descriptor
+
+#### 3.3 解析服务
+
+##### 3.3.1 通过 IServiceProvider 解析
+
+##### 3.3.2 通过 activator utilities 创建
+
+* 参数必须能分配 default value
+* 必须是 public constructor，
+* 且标记 activator utilities 特性，只能标记一个
+
+##### 3.3.3 service scope 验证
+
+* root service provider 由 `build service provider` 方法创建
+* scope 由 root service provider 创建，
+  * 其中包含 (sub) service provider
+  * scope 由 container（root service provider）释放
+  * scope service 不能是从 root service provider 解析的
+
+* scope_service 不在 scope 内解析，自动转换为 singleton !!!
+  * 这回造成内存泄漏
+
+
+
+
 
