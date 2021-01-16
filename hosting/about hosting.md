@@ -12,14 +12,33 @@
 #### 1.1 summary
 
 * ms 提供的托管应用的宿主服务
+* 用于运行托管的应用（hosted service）
+* 统一管理应用的生命周期
 
 #### 1.2 how designed
 
 ##### 1.2.1 host
 
-* 通用主机
-  * 定义了 startAsync、stopAsync 方法
-  * 扩展了同步方法，runAsyn 和 run 方法
+* 通用主机，同于运行托管的应用
+* 封装了如下组件：
+
+###### 1.2.1.1 host lifetime
+
+* 控制 host 的生命周期，
+
+###### 1.2.1.2 hosted service
+
+* 需要 host 运行的托管的应用
+
+###### 1.2.1.3 host application lifetime
+
+* 控制 hosted service 的生命周期
+* 由其创建 cancellation token，作为参数传入 hosted service 的 start 方法中
+
+###### 1.2.1.4 service provider
+
+* di，用于解析上述组件
+* 组件在 host builder 构建 host 时注入
 
 ##### 1.2.2 host builder
 
@@ -27,21 +46,28 @@
 
 ###### 1.2.2.1 构建（build）host
 
-* a - host configuration
-* b - host environment
-* c - 合并 a 和 b 到 host build context
+* a - host configuration，
+  * 读取配置信息
+* b - host environment，
+  * 读取环境信息
+* c - 合并 a 和 b 到 host build context，
+  * 创建 build context，即对 host configuration 和 host environment 的封装
 * d - app configuration
+  * 创建 host application configuration
+  * 合并了 host configuration
 * e - service provider
+  * 使用 service factory adapter 创建
+  * 注入不同的 adapter，可以使用 第三方 service provider
 
 ###### 1.2.2.2 配置 host builder
 
 * builder 中的方法
 * 扩展方法
 
-##### 1.2.3 Host 静态
+##### 1.2.3 Host 静态类
 
 * 创建 IHost 的静态方法类
-* 调用 IHostBuilder 并使用了默认配置
+* 配置并创建 host
 
 ### 2. details
 
@@ -74,7 +100,7 @@ internal class Host : IHost, IAsyncDisposable
     private readonly HostOptions _options;      
     private IEnumerable<IHostedService> _hostedServices;
         
-    /* 初始化（构造），从 di 注入服务 */
+    /* 初始化（构造），由 builder 注入服务 */
     public Host(
         IServiceProvider services, 
         IHostLifetime hostLifetime, 
@@ -82,7 +108,7 @@ internal class Host : IHost, IAsyncDisposable
         IHostApplicationLifetime applicationLifetime,
         ILogger<Host> logger)
     {
-        // 注入 service provider，
+        // 注入 service provider（在 host builder 中构建）
         // 如果为null，抛出异常
         Services = services ?? 
             throw new ArgumentNullException(nameof(services));
@@ -119,11 +145,13 @@ internal class Host : IHost, IAsyncDisposable
 ```c#
 internal class Host : IHost, IAsyncDisposable
 {
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartAsync(
+        CancellationToken cancellationToken = default)
     {
         _logger.Starting();
         
         /* 创建 cancellation token source */
+        
         using var combinedCancellationTokenSource = 
             CancellationTokenSource.CreateLinkedTokenSource(
             	cancellationToken, 
@@ -133,12 +161,15 @@ internal class Host : IHost, IAsyncDisposable
             combinedCancellationTokenSource.Token;
         
         /* 启动 host lifetime */
+        
         await _hostLifetime.WaitForStartAsync(
             combinedCancellationToken).ConfigureAwait(false);
         
         combinedCancellationToken.ThrowIfCancellationRequested();
         
         /* 启动 hosted services */
+        
+        // 解析 hosted service
         _hostedServices = 
             Services.GetService<IEnumerable<IHostedService>>();
         
@@ -156,7 +187,7 @@ internal class Host : IHost, IAsyncDisposable
             }
         }
         
-        /* 启动 host application */
+        /* 启动 host application lifetime */
         // Fire IHostApplicationLifetime.Started
         _applicationLifetime.NotifyStarted();
         
@@ -196,7 +227,7 @@ internal class Host : IHost, IAsyncDisposable
             // 创建 cancellatino token 
             CancellationToken token = linkedCts.Token;
             
-            /* 停止 host application */
+            /* 停止 host application lifetime */
             // Trigger IHostApplicationLifetime.ApplicationStopping
             _applicationLifetime.StopApplication();
             
@@ -217,7 +248,7 @@ internal class Host : IHost, IAsyncDisposable
                 }
             }
             
-            /* 停止 notify */
+            /* 停止 host application lifetime notify */
             // Fire IHostApplicationLifetime.Stopped
             _applicationLifetime.NotifyStopped();
             
@@ -241,98 +272,6 @@ internal class Host : IHost, IAsyncDisposable
         }
         
         _logger.Stopped();
-    }
-}
-
-```
-
-###### 2.1.2.3 host logging 扩展
-
-```c#
-internal static class HostingLoggerExtensions
-{
-    public static void ApplicationError(
-        this ILogger logger, 
-        EventId eventId, 
-        string message, 
-        Exception exception)
-    {
-        var reflectionTypeLoadException = 
-            exception as ReflectionTypeLoadException;
-        if (reflectionTypeLoadException != null)
-        {
-            foreach (Exception ex in reflectionTypeLoadException.LoaderExceptions)
-            {
-                message = message + Environment.NewLine + ex.Message;
-            }
-        }
-        
-        logger.LogCritical(
-            eventId: eventId,
-            message: message,
-            exception: exception);
-    }
-    
-    public static void Starting(this ILogger logger)
-    {
-        if (logger.IsEnabled(LogLevel.Debug))
-        {
-            logger.LogDebug(
-                eventId: LoggerEventIds.Starting,
-                message: "Hosting starting");
-        }
-    }
-    
-    public static void Started(this ILogger logger)
-    {
-        if (logger.IsEnabled(LogLevel.Debug))
-        {
-            logger.LogDebug(
-                eventId: LoggerEventIds.Started,
-                message: "Hosting started");
-        }
-    }
-    
-    public static void Stopping(this ILogger logger)
-    {
-        if (logger.IsEnabled(LogLevel.Debug))
-        {
-            logger.LogDebug(
-                eventId: LoggerEventIds.Stopping,
-                message: "Hosting stopping");
-        }
-    }
-    
-    public static void Stopped(this ILogger logger)
-    {
-        if (logger.IsEnabled(LogLevel.Debug))
-        {
-            logger.LogDebug(
-                eventId: LoggerEventIds.Stopped,
-                message: "Hosting stopped");
-        }
-    }
-    
-    public static void StoppedWithException(this ILogger logger, Exception ex)
-    {
-        if (logger.IsEnabled(LogLevel.Debug))
-        {
-            logger.LogDebug(
-                eventId: LoggerEventIds.StoppedWithException,
-                exception: ex,
-                message: "Hosting shutdown exception");
-        }
-    }
-    
-    public static void BackgroundServiceFaulted(this ILogger logger, Exception ex)
-    {
-        if (logger.IsEnabled(LogLevel.Error))
-        {
-            logger.LogError(
-                eventId: LoggerEventIds.BackgroundServiceFaulted,
-                exception: ex,
-                message: "BackgroundService failed");
-        }
     }
 }
 
@@ -364,6 +303,8 @@ internal class Host : IHost, IAsyncDisposable
 
 ##### 2.1.3 扩展的 host 方法
 
+* recommended method to start、stop the host
+
 ###### 2.1.3.1 start
 
 * 扩展了 start 同步方法
@@ -388,6 +329,8 @@ public static class HostingAbstractionsHostExtensions
         this IHost host, 
         CancellationToken token = default)
     {
+        // 从 host 的 service provider 中解析 IHostApplicationLifetime
+        // 其在 host builder 中注入
         IHostApplicationLifetime applicationLifetime = 
             host.Services.GetService<IHostApplicationLifetime>();
         
@@ -412,7 +355,8 @@ public static class HostingAbstractionsHostExtensions
         await waitForStop.Task.ConfigureAwait(false);
         
         // Host will use its default ShutdownTimeout if none is specified.
-        // The cancellation token may have been triggered to unblock waitForStop. Don't pass it here because that would trigger an abortive shutdown.
+        // The cancellation token may have been triggered to unblock waitForStop. 
+        // Don't pass it here because that would trigger an abortive shutdown.
         await host.StopAsync(CancellationToken.None).ConfigureAwait(false);
     }
     
@@ -466,8 +410,6 @@ public static class HostingAbstractionsHostExtensions
 
 ###### 2.1.3.4 stop
 
-* 定时关闭
-
 ```c#
 public static class HostingAbstractionsHostExtensions
 {            
@@ -480,7 +422,9 @@ public static class HostingAbstractionsHostExtensions
 
 ```
 
-##### 2.1.3 host options
+##### 2.1.4 host 组件
+
+###### 2.1.4.1 host options
 
 ```c#
 public class HostOptions
@@ -506,31 +450,80 @@ public class HostOptions
 
 ```
 
-##### 2.1.4 host lifetime
-
-* 控制 host 生命周期
+###### 2.1.4.2 hosted service
 
 ```c#
-public interface IHostLifetime
+public interface IHostedService
 {    
-    Task WaitForStartAsync(CancellationToken cancellationToken);     
+    Task StartAsync(CancellationToken cancellationToken);        
     Task StopAsync(CancellationToken cancellationToken);
 }
 
 ```
 
-##### 2.1.5 host application lifetime
-
-* 控制 host 中的 application 的生命周期
+###### 2.1.4.3 background service
 
 ```c#
-public interface IHostApplicationLifetime
-{    
-    CancellationToken ApplicationStarted { get; }        
-    CancellationToken ApplicationStopping { get; }        
-    CancellationToken ApplicationStopped { get; }
+public abstract class BackgroundService : IHostedService, IDisposable
+{
+    // 执行的任务的引用
+    private Task _executeTask;
+    public virtual Task ExecuteTask => _executeTask;
+    
+    private CancellationTokenSource _stoppingCts;
+                    
+    // 具体任务，在派生类中实现
+    protected abstract Task ExecuteAsync(CancellationToken stoppingToken);
         
-    void StopApplication();
+    /* 启动任务 */
+    public virtual Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Create linked token to allow cancelling executing task from provided token
+        _stoppingCts = CancellationTokenSource
+            .CreateLinkedTokenSource(cancellationToken);
+        
+        // Store the task we're executing
+        _executeTask = ExecuteAsync(_stoppingCts.Token);
+        
+        // If the task is completed then return it, 
+        // this will bubble cancellation and failure to the caller
+        if (_executeTask.IsCompleted)
+        {
+            return _executeTask;
+        }
+        
+        // Otherwise it's running
+        return Task.CompletedTask;
+    }
+    
+    /* 结束任务 */
+    public virtual async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Stop called without start
+        if (_executeTask == null)
+        {
+            return;
+        }
+        
+        try
+        {
+            // Signal cancellation to the executing method
+            _stoppingCts.Cancel();
+        }
+        finally
+        {
+            // Wait until the task completes or the stop token triggers
+            await Task.WhenAny(
+                	      _executeTask, 
+                		  Task.Delay(Timeout.Infinite, cancellationToken))
+                	  .ConfigureAwait(false);
+        }        
+    }
+    
+    public virtual void Dispose()
+    {
+        _stoppingCts?.Cancel();
+    }
 }
 
 ```
@@ -602,14 +595,11 @@ public class HostBuilder : IHostBuilder
     // 构建 host                    
     public IHost Build()
     {
-        // 如果已经构建过（built = true），抛出异常
+        // 保证只构建一次        
         if (_hostBuilt)
         {
             throw new InvalidOperationException(SR.BuildCalled);
-        }
-        
-        // 设置 built = true，
-        // 只能 build 一次
+        }        
         _hostBuilt = true;
         
         // a
@@ -736,7 +726,7 @@ public class HostBuilder : IHostBuilder
 
 ##### 2.2.4 扩展的配置方法
 
-###### 2.2.4.1 configure environment
+###### 2.2.4.1 配置 environment
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -776,7 +766,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.2 configure app configuration
+###### 2.2.4.2 配置 app configuration
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -792,7 +782,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.3 configure service provider
+###### 2.2.4.3 使用 default service provider
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -814,8 +804,16 @@ public static class HostingHostBuilderExtensions
             configure(context, options);
             return new DefaultServiceProviderFactory(options);
         });
-    }
-    
+    }                    
+}
+
+```
+
+###### 2.2.4.4 注册服务
+
+```c#
+public static class HostingHostBuilderExtensions
+{
     public static IHostBuilder ConfigureServices(
         this IHostBuilder hostBuilder, 
         Action<IServiceCollection> configureDelegate)
@@ -823,7 +821,15 @@ public static class HostingHostBuilderExtensions
         return hostBuilder.ConfigureServices(
             (context, collection) => configureDelegate(collection));
     }
-        
+}
+
+```
+
+###### 2.2.4.5 配置 container builer
+
+```c#
+public static class HostingHostBuilderExtensions
+{
     public static IHostBuilder ConfigureContainer<TContainerBuilder>(
         this IHostBuilder hostBuilder, 
         Action<TContainerBuilder> configureDelegate)
@@ -835,7 +841,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.4 configure logging
+###### 2.2.4.6 configure logging
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -860,7 +866,7 @@ public static class HostingHostBuilderExtensions
     
 ```
 
-###### 2.2.4.5 add hosted service
+###### 2.2.4.7 add hosted service
 
 ```c#
 public static class ServiceCollectionHostedServiceExtensions
@@ -878,8 +884,7 @@ public static class ServiceCollectionHostedServiceExtensions
         
         return services;
     }
-    
-    
+        
     public static IServiceCollection 
         AddHostedService<THostedService>(
         	this IServiceCollection services, 
@@ -1117,9 +1122,7 @@ public interface IHostEnvironment
 ###### 2.2.6.2 实现
 
 ```c#
-#pragma warning disable CS0618 // Type or member is obsolete    
-public class HostingEnvironment : IHostingEnvironment, IHostEnvironment
-#pragma warning restore CS0618 // Type or member is obsolete
+public class HostingEnvironment : IHostEnvironment
 {
     public string EnvironmentName { get; set; }    
     public string ApplicationName { get; set; }    
@@ -1134,7 +1137,7 @@ public class HostingEnvironment : IHostingEnvironment, IHostEnvironment
 * enum
 
   ```c#
-  public static class Environments
+  public static class Environment
   {
       public static readonly string Development = "Development";
       public static readonly string Staging = "Staging";
@@ -1143,7 +1146,7 @@ public class HostingEnvironment : IHostingEnvironment, IHostEnvironment
   
   ```
 
-* host key
+* host default (key in configuration)
 
   ```c#
   public static class HostDefaults
@@ -1205,6 +1208,96 @@ public static class HostEnvironmentEnvExtensions
         
         return hostEnvironment.IsEnvironment(Environments.Production);
     }            
+}
+
+```
+
+##### 2.2.7 host builder context
+
+```c#
+public class HostBuilderContext
+{
+    public HostBuilderContext(IDictionary<object, object> properties)
+    {
+        Properties = properties 
+            ?? throw new System.ArgumentNullException(nameof(properties));
+    }
+            
+    public IHostEnvironment HostingEnvironment { get; set; }        
+    public IConfiguration Configuration { get; set; }        
+    public IDictionary<object, object> Properties { get; }
+}
+
+```
+
+##### 2.2.8 service factory adapter
+
+###### 2.2.8.1 接口
+
+```c#
+internal interface IServiceFactoryAdapter
+{
+    object CreateBuilder(IServiceCollection services);    
+    IServiceProvider CreateServiceProvider(object containerBuilder);
+}
+
+```
+
+###### 2.2.8.2 实现
+
+```c#
+internal class ServiceFactoryAdapter<TContainerBuilder> : IServiceFactoryAdapter
+{
+    private IServiceProviderFactory<TContainerBuilder> 
+        _serviceProviderFactory;
+    private readonly Func<HostBuilderContext> 
+        _contextResolver;
+    private Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> 
+        _factoryResolver;
+    
+    public ServiceFactoryAdapter(
+        IServiceProviderFactory<TContainerBuilder> serviceProviderFactory)
+    {
+        _serviceProviderFactory = serviceProviderFactory ?? 
+            throw new ArgumentNullException(nameof(serviceProviderFactory));
+    }
+    
+    public ServiceFactoryAdapter(
+        Func<HostBuilderContext> contextResolver, 
+        Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> f
+        	actoryResolver)
+    {
+        _contextResolver = contextResolver ?? 
+            throw new ArgumentNullException(nameof(contextResolver));
+        _factoryResolver = factoryResolver ?? 
+            throw new ArgumentNullException(nameof(factoryResolver));
+    }
+    
+    public object CreateBuilder(IServiceCollection services)
+    {
+        if (_serviceProviderFactory == null)
+        {
+            _serviceProviderFactory = _factoryResolver(_contextResolver());
+            
+            if (_serviceProviderFactory == null)
+            {
+                throw new InvalidOperationException(SR.ResolverReturnedNull);
+            }
+        }
+        return _serviceProviderFactory.CreateBuilder(services);
+    }
+    
+    public IServiceProvider CreateServiceProvider(object containerBuilder)
+    {
+        if (_serviceProviderFactory == null)
+        {
+            throw new InvalidOperationException(
+                SR.CreateBuilderCallBeforeCreateServiceProvider);
+        }
+        
+        return _serviceProviderFactory
+            .CreateServiceProvider((TContainerBuilder)containerBuilder);
+    }
 }
 
 ```
@@ -1383,7 +1476,17 @@ public class ConsoleLifetime
 
 ```
 
-###### 2.2.1.3 use console lifetime
+###### 2.2.1.3 console lifetime options
+
+```c#
+public class ConsoleLifetimeOptions
+{    
+    public bool SuppressStatusMessages { get; set; }
+}
+
+```
+
+###### 2.2.1.4 use console lifetime
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -1557,6 +1660,82 @@ public class SystemdLifetime
         AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;        
         _applicationStartedRegistration.Dispose();
         _applicationStoppingRegistration.Dispose();
+    }
+}
+
+```
+
+###### 2.2.2.3 systemd notifier
+
+```c#
+public interface ISystemdNotifier
+{
+    /// <summary>
+    /// Sends a notification to systemd.
+    /// </summary>
+    void Notify(ServiceState state);
+    /// <summary>
+    /// Returns whether systemd is configured to receive service notifications.
+    /// </summary>
+    bool IsEnabled { get; }
+}
+
+public class SystemdNotifier : ISystemdNotifier
+{
+    private const string NOTIFY_SOCKET = "NOTIFY_SOCKET";    
+    private readonly string _socketPath;
+    
+    public SystemdNotifier() : this(GetNotifySocketPath())
+    {
+    }
+
+    // For testing
+    internal SystemdNotifier(string socketPath)
+    {
+        _socketPath = socketPath;
+    }
+    
+    /// <inheritdoc />
+    public bool IsEnabled => _socketPath != null;
+    
+    /// <inheritdoc />
+    public void Notify(ServiceState state)
+    {
+        if (!IsEnabled)
+        {
+            return;
+        }
+        
+        using (var socket = new Socket(
+            AddressFamily.Unix, 
+            SocketType.Dgram, 
+            ProtocolType.Unspecified))
+        {
+            var endPoint = new UnixDomainSocketEndPoint(_socketPath);
+            socket.Connect(endPoint);
+            
+            // It's safe to do a non-blocking call here: messages sent here are much
+            // smaller than kernel buffers so we won't get blocked.
+            socket.Send(state.GetData());
+        }
+    }
+    
+    private static string GetNotifySocketPath()
+    {
+        string socketPath = Environment.GetEnvironmentVariable(NOTIFY_SOCKET);
+        
+        if (string.IsNullOrEmpty(socketPath))
+        {
+            return null;
+        }
+        
+        // Support abstract socket paths.
+        if (socketPath[0] == '@')
+        {
+            socketPath = "\0" + socketPath.Substring(1);
+        }
+        
+        return socketPath;
     }
 }
 
@@ -1771,7 +1950,17 @@ public class WindowsServiceLifetime
 
 ```
 
-###### 2.2.3.4 use windows service lifetime
+###### 2.2.3.4 windows service lifetime options
+
+```c#
+public class WindowsServiceLifetimeOptions
+{    
+    public string ServiceName { get; set; } = string.Empty;
+}
+
+```
+
+###### 2.2.3.5 use windows service lifetime
 
 ```c#
 public static class WindowsServiceLifetimeHostBuilderExtensions
@@ -1836,9 +2025,7 @@ public interface IHostApplicationLifetime
 ##### 2.4.2 实现
 
 ```c#
-#pragma warning disable CS0618 // Type or member is obsolete
-public class ApplicationLifetime : IApplicationLifetime, IHostApplicationLifetime
-#pragma warning restore CS0618 // Type or member is obsolete
+public class ApplicationLifetime : IHostApplicationLifetime
 {
     private readonly CancellationTokenSource _startedSource = new CancellationTokenSource();
     private readonly CancellationTokenSource _stoppingSource = new CancellationTokenSource();
@@ -1946,7 +2133,107 @@ public class ApplicationLifetime : IApplicationLifetime, IHostApplicationLifetim
 
 ```
 
-#### 2.5 host 静态方法
+#### 2.5 host logging 扩展方法
+
+```c#
+internal static class HostingLoggerExtensions
+{
+    public static void ApplicationError(
+        this ILogger logger, 
+        EventId eventId, 
+        string message, 
+        Exception exception)
+    {
+        var reflectionTypeLoadException = 
+            exception as ReflectionTypeLoadException;
+        if (reflectionTypeLoadException != null)
+        {
+            foreach (Exception ex in reflectionTypeLoadException.LoaderExceptions)
+            {
+                message = message + Environment.NewLine + ex.Message;
+            }
+        }
+        
+        logger.LogCritical(
+            eventId: eventId,
+            message: message,
+            exception: exception);
+    }
+    
+    public static void Starting(this ILogger logger)
+    {
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                eventId: LoggerEventIds.Starting,
+                message: "Hosting starting");
+        }
+    }
+    
+    public static void Started(this ILogger logger)
+    {
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                eventId: LoggerEventIds.Started,
+                message: "Hosting started");
+        }
+    }
+    
+    public static void Stopping(this ILogger logger)
+    {
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                eventId: LoggerEventIds.Stopping,
+                message: "Hosting stopping");
+        }
+    }
+    
+    public static void Stopped(this ILogger logger)
+    {
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                eventId: LoggerEventIds.Stopped,
+                message: "Hosting stopped");
+        }
+    }
+    
+    public static void StoppedWithException(this ILogger logger, Exception ex)
+    {
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            logger.LogDebug(
+                eventId: LoggerEventIds.StoppedWithException,
+                exception: ex,
+                message: "Hosting shutdown exception");
+        }
+    }
+    
+    public static void BackgroundServiceFaulted(this ILogger logger, Exception ex)
+    {
+        if (logger.IsEnabled(LogLevel.Error))
+        {
+            logger.LogError(
+                eventId: LoggerEventIds.BackgroundServiceFaulted,
+                exception: ex,
+                message: "BackgroundService failed");
+        }
+    }
+}
+
+```
+
+#### 2.6 创建 host
+
+##### 2.6.1 by host builder
+
+见 2.2
+
+##### 2.6.2 by Host
+
+* 创建 host 的静态方法
 
 ```c#
 public static class Host
@@ -1980,7 +2267,7 @@ public static class Host
 
 ```
 
-##### 2.5.1 配置默认 environment
+###### 2.6.2.1 configure host configuration
 
 ```c#
 public static class Host
@@ -2009,7 +2296,7 @@ public static class Host
 
 ```
 
-##### 2.5.2 配置 app configuration
+###### 2.6.2.2 configure app configuration
 
 ```c#
 public static class Host
@@ -2018,67 +2305,66 @@ public static class Host
     {
         // var builder = new HostBuilder();
         
-        builder
-            .ConfigureAppConfiguration(
-            	(hostingContext, config) =>
-            	{
-                    IHostEnvironment env = hostingContext.HostingEnvironment;
+        builder.ConfigureAppConfiguration(
+            (hostingContext, config) =>
+            {
+                IHostEnvironment env = hostingContext.HostingEnvironment;
+                
+                // 从 DOTNET_ 和 args 中加载，
+                // reloadConfigurationChange，
+                // 默认 true，即监视变化
+                bool reloadOnChange = 
+                    hostingContext
+                    .Configuration
+                    .GetValue(
+                    	"hostBuilder:reloadConfigOnChange", 
+                    	defaultValue: true);
                     
-                    // 从 DOTNET_ 和 args 中加载，
-                    // reloadConfigurationChange，
-                    // 默认 true，即监视变化
-                    bool reloadOnChange = 
-                        hostingContext
-                        	.Configuration
-                        	.GetValue(
-                        		"hostBuilder:reloadConfigOnChange", 
-                        		defaultValue: true);
-                    
-                    config
-                        // 加载 appsettings 文件作为 configuration 源，
-                        // 可选的
-                        .AddJsonFile(
-                        	"appsettings.json", 
-                        	optional: true, 
-                        	reloadOnChange: reloadOnChange)       
-                        // 加载 appsettings.env 文件作为 configuration 源，
-                        // 可选的
-                        .AddJsonFile(
-                        	$"appsettings.{env.EnvironmentName}.json", 
-                        	optional: true, 
-                        	reloadOnChange: reloadOnChange);
-                    
-                    // 如果是 development 环境，
-                    // 且 applicationName 不为 null
-                    if (env.IsDevelopment() && 
-                        !string.IsNullOrEmpty(env.ApplicationName))
+                config
+                    // 加载 appsettings 文件作为 configuration 源，
+                    // 可选的
+                    .AddJsonFile(
+                    	"appsettings.json", 
+                    	optional: true, 
+                    	reloadOnChange: reloadOnChange)       
+                    // 加载 appsettings.env 文件作为 configuration 源，
+                    // 可选的
+                    .AddJsonFile(
+                    	$"appsettings.{env.EnvironmentName}.json", 
+	                    optional: true, 
+                    	reloadOnChange: reloadOnChange);
+                
+                // 如果是 development 环境，
+                // 且 applicationName 不为 null
+                if (env.IsDevelopment() && 
+                    !string.IsNullOrEmpty(env.ApplicationName))
+                {
+                    // 加载 application assembly 的 user secrets
+                    var appAssembly = Assembly.Load(new AssemblyName(env.ApplicationName));
+                    if (appAssembly != null)
                     {
-                        // 加载 application assembly 的 user secrets
-                        var appAssembly = Assembly.Load(new AssemblyName(env.ApplicationName));
-                        if (appAssembly != null)
-                        {
-                            config.AddUserSecrets(
-                                appAssembly, 
-                                optional: true, 
-                                reloadOnChange: reloadOnChange);
-                        }
+                        config.AddUserSecrets(
+                            appAssembly, 
+                            optional: true, 
+                            reloadOnChange: reloadOnChange);
                     }
-                    
-                    // 加载环境变量
-                    config.AddEnvironmentVariables();
-                    
-                    // 再次加载 args，                    
-                    if (args != null)
-                    {
-                        config.AddCommandLine(args);
-                    }
-                });            
+                }
+                
+                // 加载环境变量
+                config.AddEnvironmentVariables();
+                
+                // 再次加载 args，                    
+                if (args != null)
+                {
+                    config.AddCommandLine(args);
+                }
+            });            
     }
 }
-        
+
 ```
 
-##### 2.5.3 logging
+###### 2.6.2.3 configure logging
 
 ```c#
 public static class Host
@@ -2087,55 +2373,55 @@ public static class Host
     {
         // var builder = new HostBuilder();
         
-        builder            
-            .ConfigureLogging(
-            	(hostingContext, logging) =>
-            	{
-                    // windows 系统标记
-                    bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-                    
-                    // IMPORTANT: This needs to be added *before* configuration is loaded, 
-                    // this lets the defaults be overridden by the configuration.
-                    if (isWindows)
-                    {
-                        // Default the EventLogLoggerProvider to warning or above
-                        logging.AddFilter<EventLogLoggerProvider>(
-                            level => level >= LogLevel.Warning);
-                    }
-                    
-                    // 使用 configuration 中 “Logging” 节的配置
-                    logging.AddConfiguration(
-                        hostingContext.Configuration.GetSection("Logging"));
-                    
-                    // 输出到控制台
-                    logging.AddConsole();
-                    // 输出到debug
-                    logging.AddDebug();
-                    // 输出到 event source logger
-                    logging.AddEventSourceLogger();
-                    
-                    // 如果是 windows 系统，输出到 event log
-                    if (isWindows)
-                    {
-                        // Add the EventLogLoggerProvider on windows machines
-                        logging.AddEventLog();
-                    }
-                    
-                    // 追踪
-                    logging.Configure(options =>
-                    	{
-                            options.ActivityTrackingOptions = 
-                                ActivityTrackingOptions.SpanId | 
-                                ActivityTrackingOptions.TraceId | 
-                                ActivityTrackingOptions.ParentId;
-                        });                    
-                });                        
+        builder.ConfigureLogging(
+            (hostingContext, logging) =>
+            {
+                // windows 系统标记
+                bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+                
+                // IMPORTANT: This needs to be added *before* configuration is loaded, 
+                // this lets the defaults be overridden by the configuration.
+                if (isWindows)
+                {
+                    // Default the EventLogLoggerProvider to warning or above
+                    logging.AddFilter<EventLogLoggerProvider>(
+                        level => level >= LogLevel.Warning);
+                }
+                
+                // 使用 configuration 中 “Logging” 节的配置
+                logging.AddConfiguration(
+                    hostingContext.Configuration.GetSection("Logging"));
+                
+                // 输出到控制台
+                logging.AddConsole();
+                // 输出到debug
+                logging.AddDebug();
+                // 输出到 event source logger
+                logging.AddEventSourceLogger();
+                
+                // 如果是 windows 系统，输出到 event log
+                if (isWindows)
+                {
+                    // Add the EventLogLoggerProvider on windows machines
+                    logging.AddEventLog();
+                }
+                
+                
+                // 追踪
+                logging.Configure(options =>
+                {
+                    options.ActivityTrackingOptions = 
+                        ActivityTrackingOptions.SpanId | 
+                        ActivityTrackingOptions.TraceId | 
+                        ActivityTrackingOptions.ParentId;
+                });                    
+            });                        
     }
 }
-        
+
 ```
 
-##### 2.5.4 配置 service provider
+###### 2.6.2.4 configure default service provider
 
 ```c#
 public static class Host
@@ -2144,14 +2430,13 @@ public static class Host
     {
         // var builder = new HostBuilder();
         
-        builder            
-            .UseDefaultServiceProvider(
-            	(context, options) =>
-            		{
-                        bool isDevelopment = context.HostingEnvironment.IsDevelopment();
-                        options.ValidateScopes = isDevelopment;
-                        options.ValidateOnBuild = isDevelopment;
-                    });
+        builder.UseDefaultServiceProvider(
+            (context, options) =>
+            {
+                bool isDevelopment = context.HostingEnvironment.IsDevelopment();
+                options.ValidateScopes = isDevelopment;
+                options.ValidateOnBuild = isDevelopment;
+            });
     }
 }
         
@@ -2159,16 +2444,15 @@ public static class Host
 
 ### 3. practice
 
-#### 3.1 创建 host builder
+#### 3.1 创建 host 
 
-* 使用 Host 静态类的方法创建 default host builder
+##### 3.1.1 使用 Host 静态方法
 
-#### 3.2 配置 host builder
+##### 3.1.2 配置、注入 hosted service
 
-* 通过 host builder 的方法和扩展方法配置 host builder
+##### 3.1.3 构建
 
-#### 3.3 创建 host
+#### 3.2 运行 host
 
-* 调用 host builder 的 build 方法创建 host
-* 运行host
+* run 方法
 
