@@ -14,11 +14,178 @@
 
 #### 1.2 how designed
 
+##### 1.2.1 web host
 
+* 运行 web service 的 host
+* 由`IHostApplicationLifetime`控制生命周期
+
+###### 1.2.1.1 构造时注入
+
+* 注入必要的服务，
+* 这些服务从`hosted service provider`中解析，
+* 服务在`web host builder`中注入服务
+  * service collection
+  * hosting service provider
+  * web host options
+  * configuration
+
+###### 1.2.1.2 构造时解析
+
+* web host 会解析必要的服务，
+* 这些服务在`web host builder`构建前注入
+  * IStartup
+  * application lifetime
+  * hosted service executor
+  * application service provider
+  * IServer
+  * ILogger
+
+###### 1.2.1.3 初始化 web host
+
+* web host 构造后需要初始化，
+* 初始化在`web host builder`构建时调用
+  * 从 hosting service provider 中解析 IStartup
+  * 从 IStartup 中解析 app service provider 
+
+###### 1.2.1.3 启动 web host
+
+* 解析、启动日志
+* build application（构建 request delegate ）
+  * 解析 server
+  * 解析 application build factory 并创建 application builder
+  * 解析 startup filter 并用其配置 application builder
+* 解析 hosted service excutor 并执行
+* 配置server 并启动
+  * 解析 diagnostic listener，
+  * 解析 http context factory
+  * 创建 hosting application
+  * 由上述组件配置并启动 server
+* 启动 application lifetime notify
+
+###### 1.2.1.4 停止 web host
+
+* 停止日志
+* 停止 server
+* 停止 hosted service executor
+* 停止 application lifetime notify
+
+##### 1.2.2 web host builder
+
+* 创建 web host 的构造器
+
+###### 1.2.2.1 构造函数
+
+* 创建 hosting environment
+* 加载 (hosting) configuration
+* 加载环境变量并使用，即将环境变量注入 configuration
+* 创建并注入 web host builder context，包含 web host options & web host envrionment
+
+###### 1.2.2.2 构建 web host
+
+* 构建 hosting service provider
+  * 创建 service collection并注入服务
+    * 执行 hosting startup 配置
+      * 加载 hosting startup type 并用其配置 builder
+    * app configuration 
+      * 创建 configuration，
+      * 合并 hosting configuration，
+      * 用 builder 中的 action 配置，
+      * 注入到 service collection
+    * 注册服务
+      * diagnostic listener
+      * application builder factory
+      * http context factory
+      * middleware factory
+      * options
+      * logging
+      * service provider factory
+    * 注册 IStartup
+      * 解析 startup type
+      * 注册 startup type
+    * 配置 service collection
+      * 用 builder 中的 action 配置 service collection（注入服务）
+  * 获取 service provider
+    * default service provider （ms 实现）
+    * service provider factory 创建（第三方实现）
+* 注入 application service
+  * 注入并替换 diagnostic listener & source
+* 通过扩展方法注入 server
+* 创建 web host
+* 初始化 web host
+
+###### 1.2.2.3 配置 web host builder
+
+* 配置（添加）configuration
+* 配置（注册）服务
+* 添加具体项到 configuration、envrionment
+
+##### 1.2.3 generic web host builder
+
+* 适配 generic host 的 web host builder
+* generic host 出现后 web host builder 的重构实现
+* 用于进行配置（注册服务）
+* 不能实际生成 web host（在 generic host 中，web host 由 generic web host service 代替）
+
+###### 1.2.3.1 构造函数
+
+* 解析或创建`web host builder context`
+  * 从`host builder context`中解析`web host builder context`
+  * 用`host builder context`中的内容创建`web host builder context`
+* 执行 hosting startup 配置
+* 注册服务
+  * diagnostic listener、source
+  * application builder factory
+  * http context factory
+  * middleware factory
+  * options
+  * logging
+  * service provider factory
+* 注册 IStartup
+* 通过扩展方法
+  * 注册 server
+  * 创建 service provider
+
+##### 1.2.4 hosting startup web host builder
+
+* hosting startup 配置项
+* 不用于直接生成 web host
+
+##### 1.2.5 generic web host service
+
+* 代替 web host 执行 start、stop
+
+###### 1.2.5.1 构造函数
+
+* 直接从 host service provider 中解析并注入相关服务
+* 与 web host 相似
+
+###### 1.2.5.2 启动
+
+* 与 web host 相似
+
+###### 1.2.5.3 停止
+
+* 与 web host 相似
 
 ### 2a. details - web host
 
 #### 2.1 web host
+
+* 构造函数中注入必要的服务，这些服务由 web host builder 构建并注入
+  * service collection
+  * hosting service provider
+  * configuration
+
+* 初始化，创建、启动必要的服务
+  * 从 hosting service provider 中解析 application lifetime，并注入 service collection
+  * 从 hosting service provider 中解析 IStartup
+  * 从 IStartup 中解析 app service provider
+* 启动 web host
+  * 解析 logger 并启动
+  * 构建 applicaiton builder，进而构建 request delegate
+  * 解析 applicaiton lifetime 并启动
+  * 解析 hosted service executor 并启动
+  * 解析 server、配置并启动
 
 ##### 2.1.1 接口
 
@@ -90,6 +257,8 @@ internal class WebHost : IWebHost, IAsyncDisposable
 ```
 
 ###### 2.1.2.1 构造函数
+
+* 从`web host builder`中解析并注入服务
 
 ```c#
 internal class WebHost : IWebHost, IAsyncDisposable
@@ -193,7 +362,6 @@ internal class WebHost : IWebHost, IAsyncDisposable
 ##### 2.1.3 web host initial
 
 * 从 IStartup 构建 service provider
-* web app 天然是 scoped
 
 ###### 2.1.3.1 initial
 
@@ -225,7 +393,7 @@ internal class WebHost : IWebHost, IAsyncDisposable
                 throw;
             }
             
-            // 记录异常
+            // 并记录异常
             _applicationServicesException = ExceptionDispatchInfo.Capture(ex);
         }
     }
@@ -246,7 +414,7 @@ internal class WebHost : IWebHost, IAsyncDisposable
         {
             // 解析 IStartup
             EnsureStartup();
-            // 构建 service provider
+            // 从 IStartup 构建 service provider
             _applicationServices = 
                 _startup.ConfigureServices(_applicationServiceCollection);
         }
@@ -816,9 +984,11 @@ public static class WebHostExtensions
 
 ```
 
-#### 2.2 web host options
+#### 2.2 web host 组件
 
 ##### 2.2.1 web host options
+
+* 从 configuration 中读取配置，构建 web host options
 
 ```c#
 internal class WebHostOptions
@@ -920,6 +1090,8 @@ internal class WebHostOptions
 
 ##### 2.2.2 web host default
 
+* web host builder 在 configuration 中的 key_name
+
 ```c#
 public static class WebHostDefaults
 {    
@@ -947,7 +1119,7 @@ public static class WebHostDefaults
 
 ```
 
-#### 2.3 application lifetime
+##### 2.2.3 application lifetime
 
 ```c#
 internal class ApplicationLifetime : IHostApplicationLifetime
@@ -1034,7 +1206,7 @@ internal class ApplicationLifetime : IHostApplicationLifetime
 
 ```
 
-#### 2.4  hosted service executor
+##### 2.2.4  hosted service executor
 
 ```c#
 internal class HostedServiceExecutor
@@ -1101,201 +1273,41 @@ internal class HostedServiceExecutor
 
 ```
 
+##### 2.2.5 application builder factory
 
-
-#### 2.a IStartup
-
-##### 2.a.1 接口
+###### 2.2.5.1 接口
 
 ```c#
-public interface IStartup
+public interface IApplicationBuilderFactory
 {    
-    IServiceProvider ConfigureServices(IServiceCollection services);         
-    void Configure(IApplicationBuilder app);
+    IApplicationBuilder CreateBuilder(IFeatureCollection serverFeatures);
 }
 
 ```
 
-##### 2.a.2 实现
-
-###### 2.a.2.1 startup base
+###### 2.2.5.2 实现
 
 ```c#
-public abstract class StartupBase : IStartup
-{            
-    IServiceProvider IStartup.ConfigureServices(IServiceCollection services)
-    {
-        ConfigureServices(services);
-        return CreateServiceProvider(services);
-    }
-    
-    public abstract void Configure(IApplicationBuilder app);
-    
-    public virtual void ConfigureServices(IServiceCollection services)
-    {
-    }
-        
-    public virtual IServiceProvider CreateServiceProvider(
-        IServiceCollection services)
-    {
-        return services.BuildServiceProvider();
-    }
-}
-
-
-public abstract class StartupBase<TBuilder> : 	
-	StartupBase where TBuilder : notnull
+public class ApplicationBuilderFactory : IApplicationBuilderFactory
 {
-    private readonly IServiceProviderFactory<TBuilder> _factory;            
-    public StartupBase(IServiceProviderFactory<TBuilder> factory)
-    {
-        _factory = factory;
-    }
-    
-    
-    public override IServiceProvider CreateServiceProvider(
-        IServiceCollection services)
-    {
-        var builder = _factory.CreateBuilder(services);
-        ConfigureContainer(builder);
-        return _factory.CreateServiceProvider(builder);
-    }
-    
-    
-    public virtual void ConfigureContainer(TBuilder builder)
-    {
-    }
-}
-
-```
-
-###### 2.a.2.2 delegate startup
-
-```c#
-public class DelegateStartup : StartupBase<IServiceCollection>
-{
-    private Action<IApplicationBuilder> _configureApp;            
-    public DelegateStartup(
-        IServiceProviderFactory<IServiceCollection> factory, 
-        Action<IApplicationBuilder> configureApp) : 
-    		base(factory)
-    {
-        _configureApp = configureApp;
-    }
-    
+    private readonly IServiceProvider _serviceProvider;
         
-    public override void Configure(IApplicationBuilder app) => 
-        _configureApp(app);
-}
-
-```
-
-###### 2.a.2.3 convention statup
-
-```c#
-internal class ConventionBasedStartup : IStartup
-{
-    private readonly StartupMethods _methods;    
-    public ConventionBasedStartup(StartupMethods methods)
+    public ApplicationBuilderFactory(IServiceProvider serviceProvider)
     {
-        _methods = methods;
+        _serviceProvider = serviceProvider;
     }
-    
-    public IServiceProvider ConfigureServices(
-        IServiceCollection services)
+        
+    public IApplicationBuilder CreateBuilder(IFeatureCollection serverFeatures)
     {
-        try
-        {
-            return _methods.ConfigureServicesDelegate(services);
-        }
-        catch (Exception ex)
-        {
-            if (ex is TargetInvocationException)
-            {
-                ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();
-            }
-            
-            throw;
-        }
+        return new ApplicationBuilder(_serviceProvider, serverFeatures);
     }
-    
-    public void Configure(IApplicationBuilder app)
-    {
-        try
-        {
-            _methods.ConfigureDelegate(app);
-        }
-        catch (Exception ex)
-        {
-            if (ex is TargetInvocationException)
-            {
-                ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();
-            }
-            
-            throw;
-        }
-    }        
 }
 
 ```
 
-##### 2.2.3 startup method
+##### 2.2.6 server addresses feature
 
-```c#
-internal class StartupMethods
-{
-    public object? StartupInstance { get; }
-    public Func<IServiceCollection, IServiceProvider> ConfigureServicesDelegate { get; }        
-    public Action<IApplicationBuilder> ConfigureDelegate { get; }
-    
-    public StartupMethods(
-        object? instance, 
-        Action<IApplicationBuilder> configure, 
-        Func<IServiceCollection, IServiceProvider> configureServices)
-    {
-        Debug.Assert(configure != null);
-        Debug.Assert(configureServices != null);
-        
-        StartupInstance = instance;
-        ConfigureDelegate = configure;
-        ConfigureServicesDelegate = configureServices;
-    }            
-}
-
-```
-
-#### 2.3 iserver
-
-##### 2.3.1 接口
-
-```c#
-public interface IServer : IDisposable
-{    
-    IFeatureCollection Features { get; }
-        
-    Task StartAsync<TContext>(
-        IHttpApplication<TContext> application, 
-        CancellationToken cancellationToken) 
-        	where TContext : notnull;
-        
-    Task StopAsync(CancellationToken cancellationToken);
-}
-
-```
-
-
-
-```c#
-public interface IHttpApplication<TContext> where TContext : notnull
-{    
-    TContext CreateContext(IFeatureCollection contextFeatures);        
-    Task ProcessRequestAsync(TContext context);        
-    void DisposeContext(TContext context, Exception? exception);
-}
-
-```
-
-
+###### 2.2.6.1 接口
 
 ```c#
 public interface IServerAddressesFeature
@@ -1304,368 +1316,282 @@ public interface IServerAddressesFeature
     bool PreferHostingUrls { get; set; }
 }
 
-public class ServerAddressesFeature : IServerAddressesFeature
-    {
-        /// <inheritdoc />
-        public ICollection<string> Addresses { get; } = new List<string>();
-
-        /// <inheritdoc />
-        public bool PreferHostingUrls { get; set; }
-    }
 ```
 
-#### 2.4 application builder
+###### 2.2.6.2 实现
 
 ```c#
-public interface IApplicationBuilderFactory
-    {
-        /// <summary>
-        /// Create an <see cref="IApplicationBuilder" /> builder given a <paramref name="serverFeatures" />
-        /// </summary>
-        /// <param name="serverFeatures">An <see cref="IFeatureCollection"/> of HTTP features.</param>
-        /// <returns>An <see cref="IApplicationBuilder"/> configured with <paramref name="serverFeatures"/>.</returns>
-        IApplicationBuilder CreateBuilder(IFeatureCollection serverFeatures);
-    }
-
-public class ApplicationBuilderFactory : IApplicationBuilderFactory
-    {
-        private readonly IServiceProvider _serviceProvider;
-
-        /// <summary>
-        /// Initialize a new factory instance with an <see cref="IServiceProvider" />.
-        /// </summary>
-        /// <param name="serviceProvider">The <see cref="IServiceProvider"/> used to resolve dependencies and initialize components.</param>
-        public ApplicationBuilderFactory(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
-
-        /// <summary>
-        /// Create an <see cref="IApplicationBuilder" /> builder given a <paramref name="serverFeatures" />.
-        /// </summary>
-        /// <param name="serverFeatures">An <see cref="IFeatureCollection"/> of HTTP features.</param>
-        /// <returns>An <see cref="IApplicationBuilder"/> configured with <paramref name="serverFeatures"/>.</returns>
-        public IApplicationBuilder CreateBuilder(IFeatureCollection serverFeatures)
-        {
-            return new ApplicationBuilder(_serviceProvider, serverFeatures);
-        }
-    }
+ public class ServerAddressesFeature : IServerAddressesFeature
+ {
+     /// <inheritdoc />
+     public ICollection<string> Addresses { get; } = new List<string>();     
+     /// <inheritdoc />
+     public bool PreferHostingUrls { get; set; }
+ }
 
 ```
 
+##### 2.2.7 hosting application
 
-
-
-
-#### 2.5 web host builder
-
-##### 2.5.1 接口
+###### 2.2.7.1 接口
 
 ```c#
-
-```
-
-##### 2.5.2 实现
-
-```c#
-
-```
-
-###### 2.5.2.1 configure service
-
-
-
-###### 2.5.2.2 configure
-
-
-
-##### 2.5.3 build
-
-```c#
-
-```
-
-###### 2.5.3.1 build common service
-
-```c#
-
-```
-
-
-
-###### 2.5.3.2 clone
-
-```c#
-internal static class ServiceCollectionExtensions
-    {
-        public static IServiceCollection Clone(this IServiceCollection serviceCollection)
-        {
-            IServiceCollection clone = new ServiceCollection();
-            foreach (var service in serviceCollection)
-            {
-                clone.Add(service);
-            }
-            return clone;
-        }
-    }
-```
-
-
-
-###### 2.5.3.3 get provider from factory
-
-```c#
-
-```
-
-###### 2.5.3.4 resovle content path
-
-```c#
-public class WebHostBuilder : IWebHostBuilder
+public interface IHttpApplication<TContext> where TContext : notnull
 {
-    
+    TContext CreateContext(IFeatureCollection contextFeatures);        
+    Task ProcessRequestAsync(TContext context);        
+    void DisposeContext(TContext context, Exception? exception);
 }
 
 ```
 
-###### 2.5.3.5 add application service
+###### 2.2.7.2 实现
 
 ```c#
-
-```
-
-##### 2.5.4 builder 扩展方法
-
-```c#
-public static IWebHostBuilder Configure(this IWebHostBuilder hostBuilder, Action<IApplicationBuilder> configureApp)
+internal class HostingApplication : IHttpApplication<HostingApplication.Context>
+{
+    private readonly RequestDelegate _application;
+    private readonly IHttpContextFactory? _httpContextFactory;
+    private readonly DefaultHttpContextFactory? _defaultHttpContextFactory;
+    private HostingApplicationDiagnostics _diagnostics;
+    
+    public HostingApplication(
+        RequestDelegate application,
+        ILogger logger,
+        DiagnosticListener diagnosticSource,
+        IHttpContextFactory httpContextFactory)
+    {
+        _application = application;
+        
+        _diagnostics = new HostingApplicationDiagnostics(
+            logger, 
+            diagnosticSource);
+        
+        if (httpContextFactory is DefaultHttpContextFactory factory)
         {
-            return hostBuilder.Configure((_, app) => configureApp(app), configureApp.GetMethodInfo().DeclaringType!.Assembly.GetName().Name!);
+            _defaultHttpContextFactory = factory;
         }
-
-        /// <summary>
-        /// Specify the startup method to be used to configure the web application.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <param name="configureApp">The delegate that configures the <see cref="IApplicationBuilder"/>.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder Configure(this IWebHostBuilder hostBuilder, Action<WebHostBuilderContext, IApplicationBuilder> configureApp)
+        else
         {
-            return hostBuilder.Configure(configureApp, configureApp.GetMethodInfo().DeclaringType!.Assembly.GetName().Name!);
-        }
-
-        private static IWebHostBuilder Configure(this IWebHostBuilder hostBuilder, Action<WebHostBuilderContext, IApplicationBuilder> configureApp, string startupAssemblyName)
-        {
-            if (configureApp == null)
-            {
-                throw new ArgumentNullException(nameof(configureApp));
-            }
-
-            hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
-
-            // Light up the ISupportsStartup implementation
-            if (hostBuilder is ISupportsStartup supportsStartup)
-            {
-                return supportsStartup.Configure(configureApp);
-            }
-
-            return hostBuilder.ConfigureServices((context, services) =>
-            {
-                services.AddSingleton<IStartup>(sp =>
-                {
-                    return new DelegateStartup(sp.GetRequiredService<IServiceProviderFactory<IServiceCollection>>(), (app => configureApp(context, app)));
-                });
-            });
-        }
-
-        /// <summary>
-        /// Specify a factory that creates the startup instance to be used by the web host.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <param name="startupFactory">A delegate that specifies a factory for the startup class.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        /// <remarks>When using the il linker, all public methods of <typeparamref name="TStartup"/> are preserved. This should match the Startup type directly (and not a base type).</remarks>
-        public static IWebHostBuilder UseStartup<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)]TStartup>(this IWebHostBuilder hostBuilder, Func<WebHostBuilderContext, TStartup> startupFactory) where TStartup : class
-        {
-            if (startupFactory == null)
-            {
-                throw new ArgumentNullException(nameof(startupFactory));
-            }
-
-            var startupAssemblyName = startupFactory.GetMethodInfo().DeclaringType!.Assembly.GetName().Name;
-
-            hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
-
-            // Light up the GenericWebHostBuilder implementation
-            if (hostBuilder is ISupportsStartup supportsStartup)
-            {
-                return supportsStartup.UseStartup(startupFactory);
-            }
-
-            return hostBuilder
-                .ConfigureServices((context, services) =>
-                {
-                    services.AddSingleton(typeof(IStartup), sp =>
-                    {
-                        var instance = startupFactory(context) ?? throw new InvalidOperationException("The specified factory returned null startup instance.");
-
-                        var hostingEnvironment = sp.GetRequiredService<IHostEnvironment>();
-
-                        // Check if the instance implements IStartup before wrapping
-                        if (instance is IStartup startup)
-                        {
-                            return startup;
-                        }
-
-                        return new ConventionBasedStartup(StartupLoader.LoadMethods(sp, instance.GetType(), hostingEnvironment.EnvironmentName, instance));
-                    });
-                });
-        }
-
-        /// <summary>
-        /// Specify the startup type to be used by the web host.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <param name="startupType">The <see cref="Type"/> to be used.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder UseStartup(this IWebHostBuilder hostBuilder, [DynamicallyAccessedMembers(StartupLinkerOptions.Accessibility)] Type startupType)
-        {
-            if (startupType == null)
-            {
-                throw new ArgumentNullException(nameof(startupType));
-            }
-
-            var startupAssemblyName = startupType.Assembly.GetName().Name;
-
-            hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
-
-            // Light up the GenericWebHostBuilder implementation
-            if (hostBuilder is ISupportsStartup supportsStartup)
-            {
-                return supportsStartup.UseStartup(startupType);
-            }
-
-            return hostBuilder
-                .ConfigureServices(services =>
-                {
-                    if (typeof(IStartup).IsAssignableFrom(startupType))
-                    {
-                        services.AddSingleton(typeof(IStartup), startupType);
-                    }
-                    else
-                    {
-                        services.AddSingleton(typeof(IStartup), sp =>
-                        {
-                            var hostingEnvironment = sp.GetRequiredService<IHostEnvironment>();
-                            return new ConventionBasedStartup(StartupLoader.LoadMethods(sp, startupType, hostingEnvironment.EnvironmentName));
-                        });
-                    }
-                });
-        }
-
-        /// <summary>
-        /// Specify the startup type to be used by the web host.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <typeparam name ="TStartup">The type containing the startup methods for the application.</typeparam>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder UseStartup<[DynamicallyAccessedMembers(StartupLinkerOptions.Accessibility)]TStartup>(this IWebHostBuilder hostBuilder) where TStartup : class
-        {
-            return hostBuilder.UseStartup(typeof(TStartup));
-        }
-
-        /// <summary>
-        /// Configures the default service provider
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <param name="configure">A callback used to configure the <see cref="ServiceProviderOptions"/> for the default <see cref="IServiceProvider"/>.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder UseDefaultServiceProvider(this IWebHostBuilder hostBuilder, Action<ServiceProviderOptions> configure)
-        {
-            return hostBuilder.UseDefaultServiceProvider((context, options) => configure(options));
-        }
-
-        /// <summary>
-        /// Configures the default service provider
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <param name="configure">A callback used to configure the <see cref="ServiceProviderOptions"/> for the default <see cref="IServiceProvider"/>.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder UseDefaultServiceProvider(this IWebHostBuilder hostBuilder, Action<WebHostBuilderContext, ServiceProviderOptions> configure)
-        {
-            // Light up the GenericWebHostBuilder implementation
-            if (hostBuilder is ISupportsUseDefaultServiceProvider supportsDefaultServiceProvider)
-            {
-                return supportsDefaultServiceProvider.UseDefaultServiceProvider(configure);
-            }
-
-            return hostBuilder.ConfigureServices((context, services) =>
-            {
-                var options = new ServiceProviderOptions();
-                configure(context, options);
-                services.Replace(ServiceDescriptor.Singleton<IServiceProviderFactory<IServiceCollection>>(new DefaultServiceProviderFactory(options)));
-            });
-        }
-
-        /// <summary>
-        /// Adds a delegate for configuring the <see cref="IConfigurationBuilder"/> that will construct an <see cref="IConfiguration"/>.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder"/> to configure.</param>
-        /// <param name="configureDelegate">The delegate for configuring the <see cref="IConfigurationBuilder" /> that will be used to construct an <see cref="IConfiguration" />.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        /// <remarks>
-        /// The <see cref="IConfiguration"/> and <see cref="ILoggerFactory"/> on the <see cref="WebHostBuilderContext"/> are uninitialized at this stage.
-        /// The <see cref="IConfigurationBuilder"/> is pre-populated with the settings of the <see cref="IWebHostBuilder"/>.
-        /// </remarks>
-        public static IWebHostBuilder ConfigureAppConfiguration(this IWebHostBuilder hostBuilder, Action<IConfigurationBuilder> configureDelegate)
-        {
-            return hostBuilder.ConfigureAppConfiguration((context, builder) => configureDelegate(builder));
-        }
-
-        /// <summary>
-        /// Adds a delegate for configuring the provided <see cref="ILoggingBuilder"/>. This may be called multiple times.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder" /> to configure.</param>
-        /// <param name="configureLogging">The delegate that configures the <see cref="ILoggingBuilder"/>.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder ConfigureLogging(this IWebHostBuilder hostBuilder, Action<ILoggingBuilder> configureLogging)
-        {
-            return hostBuilder.ConfigureServices(collection => collection.AddLogging(configureLogging));
-        }
-
-        /// <summary>
-        /// Adds a delegate for configuring the provided <see cref="LoggerFactory"/>. This may be called multiple times.
-        /// </summary>
-        /// <param name="hostBuilder">The <see cref="IWebHostBuilder" /> to configure.</param>
-        /// <param name="configureLogging">The delegate that configures the <see cref="LoggerFactory"/>.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder ConfigureLogging(this IWebHostBuilder hostBuilder, Action<WebHostBuilderContext, ILoggingBuilder> configureLogging)
-        {
-            return hostBuilder.ConfigureServices((context, collection) => collection.AddLogging(builder => configureLogging(context, builder)));
-        }
-
-        /// <summary>
-        /// Configures the <see cref="IWebHostEnvironment.WebRootFileProvider"/> to use static web assets
-        /// defined by referenced projects and packages.
-        /// </summary>
-        /// <param name="builder">The <see cref="IWebHostBuilder"/>.</param>
-        /// <returns>The <see cref="IWebHostBuilder"/>.</returns>
-        public static IWebHostBuilder UseStaticWebAssets(this IWebHostBuilder builder)
-        {
-            builder.ConfigureAppConfiguration((context, configBuilder) =>
-            {
-                StaticWebAssetsLoader.UseStaticWebAssets(context.HostingEnvironment, context.Configuration);
-            });
-
-            return builder;
+            _httpContextFactory = httpContextFactory;
         }
     }
+    
+    // Set up the request
+    public Context CreateContext(IFeatureCollection contextFeatures)
+    {
+        Context? hostContext;
+        if (contextFeatures is IHostContextContainer<Context> container)
+        {
+            hostContext = container.HostContext;
+            if (hostContext is null)
+            {
+                hostContext = new Context();
+                container.HostContext = hostContext;
+            }
+        }
+        else
+        {
+            // Server doesn't support pooling, so create a new Context
+            hostContext = new Context();
+        }
+        
+        HttpContext httpContext;
+        if (_defaultHttpContextFactory != null)
+        {
+            var defaultHttpContext = (DefaultHttpContext?)hostContext.HttpContext;
+            if (defaultHttpContext is null)
+            {
+                httpContext = _defaultHttpContextFactory.Create(contextFeatures);
+                hostContext.HttpContext = httpContext;
+            }
+            else
+            {
+                _defaultHttpContextFactory.Initialize(defaultHttpContext, contextFeatures);
+                httpContext = defaultHttpContext;
+            }
+        }
+        else
+        {
+            httpContext = _httpContextFactory!.Create(contextFeatures);
+            hostContext.HttpContext = httpContext;
+        }
+        
+        _diagnostics.BeginRequest(httpContext, hostContext);
+        return hostContext;
+    }
+    
+    // Execute the request
+    public Task ProcessRequestAsync(Context context)
+    {
+        return _application(context.HttpContext!);
+    }
+    
+    // Clean up the request
+    public void DisposeContext(Context context, Exception? exception)
+    {
+        var httpContext = context.HttpContext!;
+        _diagnostics.RequestEnd(httpContext, exception, context);
+        
+        if (_defaultHttpContextFactory != null)
+        {
+            _defaultHttpContextFactory.Dispose((DefaultHttpContext)httpContext);
+            
+            if (_defaultHttpContextFactory.HttpContextAccessor != null)
+            {
+                // Clear the HttpContext if the accessor was used. 
+                // It's likely that the lifetime extends
+                // past the end of the http request and we want to 
+                // avoid changing the reference from under consumers.
+                context.HttpContext = null;
+            }
+        }
+        else
+        {
+            _httpContextFactory!.Dispose(httpContext);
+        }
+        
+        _diagnostics.ContextDisposed(context);
+        
+        // Reset the context as it may be pooled
+        context.Reset();
+    }
+    
+    
+    internal class Context
+    {
+        public HttpContext? HttpContext { get; set; }
+        public IDisposable? Scope { get; set; }
+        public Activity? Activity { get; set; }
+        internal HostingRequestStartingLog? StartLog { get; set; }
+        
+        public long StartTimestamp { get; set; }
+        internal bool HasDiagnosticListener { get; set; }
+        public bool EventLogEnabled { get; set; }
+        
+        public void Reset()
+        {
+            // Not resetting HttpContext here as we pool it on the Context
+            
+            Scope = null;
+            Activity = null;
+            StartLog = null;
+            
+            StartTimestamp = 0;
+            HasDiagnosticListener = false;
+            EventLogEnabled = false;
+        }
+    }
+}
+
 ```
 
-### 2b. web host builder
+###### 2.2.7.3 IHostContextContainer
+
+```c#
+public interface IHostContextContainer<TContext> where TContext : notnull
+{    
+    TContext? HostContext { get; set; }
+}
+
+```
+
+###### 2.2.7.4 default http context factory
+
+```c#
+public class DefaultHttpContextFactory : IHttpContextFactory
+{
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly FormOptions _formOptions;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
+        
+    public DefaultHttpContextFactory(IServiceProvider serviceProvider)
+    {
+        // May be null
+        _httpContextAccessor = serviceProvider
+            .GetService<IHttpContextAccessor>();
+        _formOptions = serviceProvider
+            .GetRequiredService<IOptions<FormOptions>>().Value;
+        _serviceScopeFactory = serviceProvider
+            .GetRequiredService<IServiceScopeFactory>();
+    }
+    
+    internal IHttpContextAccessor? HttpContextAccessor => _httpContextAccessor;
+    
+    
+    public HttpContext Create(IFeatureCollection featureCollection)
+    {
+        if (featureCollection is null)
+        {
+            throw new ArgumentNullException(nameof(featureCollection));
+        }
+        
+        var httpContext = new DefaultHttpContext(featureCollection);
+        Initialize(httpContext);
+        return httpContext;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Initialize(
+        DefaultHttpContext httpContext, 
+        IFeatureCollection featureCollection)
+    {
+        Debug.Assert(featureCollection != null);
+        Debug.Assert(httpContext != null);
+        
+        httpContext.Initialize(featureCollection);
+        
+        Initialize(httpContext);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private DefaultHttpContext Initialize(DefaultHttpContext httpContext)
+    {
+        if (_httpContextAccessor != null)
+        {
+            _httpContextAccessor.HttpContext = httpContext;
+        }
+        
+        httpContext.FormOptions = _formOptions;
+        httpContext.ServiceScopeFactory = _serviceScopeFactory;
+        
+        return httpContext;
+    }
+        
+    public void Dispose(HttpContext httpContext)
+    {
+        if (_httpContextAccessor != null)
+        {
+            _httpContextAccessor.HttpContext = null;
+        }
+    }
+    
+    internal void Dispose(DefaultHttpContext httpContext)
+    {
+        if (_httpContextAccessor != null)
+        {
+            _httpContextAccessor.HttpContext = null;
+        }
+        
+        httpContext.Uninitialize();
+    }
+}
+
+```
+
+##### 2.2.8 hosting logger extensions
+
+```c#
+
+```
+
+
+
+### 2.b details - web host builder
 
 #### 2.1 web host builder
 
-##### 2.1.1 接口
+##### 2.1.1. 接口
 
 ```c#
 public interface IWebHostBuilder
@@ -1692,18 +1618,7 @@ public interface IWebHostBuilder
 
 ```
 
-##### 2.1.2 builder context
-
-```c#
-public class WebHostBuilderContext
-{
-    public IWebHostEnvironment HostingEnvironment { get; set; } = default!;        
-    public IConfiguration Configuration { get; set; } = default!;
-}
-
-```
-
-##### 2.1.3 实现
+##### 2.1.2 实现
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -1713,10 +1628,10 @@ public class WebHostBuilder : IWebHostBuilder
     private readonly WebHostBuilderContext _context;    
     private WebHostOptions? _options;
     
-    // action -> configure service
+    // action -> configure service collection
     private Action<WebHostBuilderContext, IServiceCollection>? 
         _configureServices;
-    // action -> configure (configuration builder)
+    // action -> configure configuration builder
     private Action<WebHostBuilderContext, IConfigurationBuilder>? 
         _configureAppConfigurationBuilder;
 
@@ -1728,7 +1643,7 @@ public class WebHostBuilder : IWebHostBuilder
         _hostingEnvironment = new HostingEnvironment();
         
         // 创建 configuration，
-        // 读取环境变量
+        // 读取环境变量 ASPENTCORE_
         _config = new ConfigurationBuilder()
             .AddEnvironmentVariables(prefix: "ASPNETCORE_")
             .Build();
@@ -1772,13 +1687,13 @@ public class WebHostBuilder : IWebHostBuilder
         _config[key] = value;
         return this;
     }    
+    
+    // ...
 }
 
 ```
 
-#### 2.2 配置builder
-
-##### 2.2.1 configure service
+##### 2.1.3 configure services
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -1806,7 +1721,7 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-##### 2.2.2 configure configuration builder
+##### 2.1.4 configure app configuration
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -1822,9 +1737,7 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-#### 2.3 创建 web host
-
-##### 2.3.1 build
+#### 2.2 构建 web host
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -1847,38 +1760,6 @@ public class WebHostBuilder : IWebHostBuilder
             GetProviderFromFactory(hostingServices);
         
         /* b - 如果没有禁用 status msg，输出过时信息*/
-        /*
-        if (!_options.SuppressStatusMessages)
-        {
-            // Warn about deprecated environment variables
-            if (Environment
-                	.GetEnvironmentVariable("Hosting:Environment") != null)
-            {
-                Console.WriteLine(
-                    "The environment variable 'Hosting:Environment' 
-                    "is obsolete and has been replaced 
-                    "with 'ASPNETCORE_ENVIRONMENT'");
-            }
-            
-            if (Environment
-                	.GetEnvironmentVariable("ASPNET_ENV") != null)
-            {
-                Console.WriteLine(
-                    "The environment variable 'ASPNET_ENV' 
-                    "is obsolete and has been replaced 
-                    "with 'ASPNETCORE_ENVIRONMENT'");
-            }
-            
-            if (Environment
-                	.GetEnvironmentVariable("ASPNETCORE_SERVER.URLS") != null)
-            {
-                Console.WriteLine(
-                    "The environment variable 'ASPNETCORE_SERVER.URLS' 
-                    "is obsolete and has been replaced 
-                    "with 'ASPNETCORE_URLS'");
-            }
-        }
-        */
         
         /* c - 添加 application service */
         AddApplicationServices(applicationServices, hostingServiceProvider);
@@ -1928,7 +1809,49 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-##### 2.3.2 build common service
+##### 2.2.1  输出 obsolete 信息
+
+```c#
+public class WebHostBuilder : IWebHostBuilder
+{
+    public IWebHost Build()
+    {
+        if (!_options.SuppressStatusMessages)
+        {
+            // Warn about deprecated environment variables
+            if (Environment
+                	.GetEnvironmentVariable("Hosting:Environment") != null)
+            {
+                Console.WriteLine(
+                    "The environment variable 'Hosting:Environment' 
+                    "is obsolete and has been replaced 
+                    "with 'ASPNETCORE_ENVIRONMENT'");
+            }
+            
+            if (Environment
+                	.GetEnvironmentVariable("ASPNET_ENV") != null)
+            {
+                Console.WriteLine(
+                    "The environment variable 'ASPNET_ENV' 
+                    "is obsolete and has been replaced 
+                    "with 'ASPNETCORE_ENVIRONMENT'");
+            }
+            
+            if (Environment
+                	.GetEnvironmentVariable("ASPNETCORE_SERVER.URLS") != null)
+            {
+                Console.WriteLine(
+                    "The environment variable 'ASPNETCORE_SERVER.URLS' 
+                    "is obsolete and has been replaced 
+                    "with 'ASPNETCORE_URLS'");
+            }
+        }
+    }
+}
+
+```
+
+##### 2.2.2 build common service
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -1939,7 +1862,8 @@ public class WebHostBuilder : IWebHostBuilder
     {
         hostingStartupErrors = null;
         
-        // 创建 web host options
+        // 创建 web host options,
+        // 注入 envrionment variable & assembly name
         _options = new WebHostOptions(
             _config, 
             Assembly
@@ -1953,7 +1877,7 @@ public class WebHostBuilder : IWebHostBuilder
         
         /* 配置 web hosting environment，
            hosting environment 在 builder 构造函数中创建；
-           web host environment => builder context*/                
+           web host environment => builder context */                
         
         /* 创建 service collection,
            注入 web host (builder) 组件服务 */
@@ -1975,12 +1899,9 @@ public class WebHostBuilder : IWebHostBuilder
            configuration => builder context */
         
         /* 注册（web）服务 */
-        
-        
-        
+                        
         /* 注册 IStartup */
-        
-        
+                
         _configureServices?.Invoke(_context, services);
         
         return services;
@@ -1989,9 +1910,9 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-###### 2.3.2.1 hosting startup assembly
+###### 2.2.2.1  执行 hosting startup 中的配置
 
-* load hosting startup assembly
+* load startup type from assembly
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2049,56 +1970,7 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-* hosting startup attribute
-
-```c#
-[AttributeUsage(AttributeTargets.Assembly, Inherited = false, AllowMultiple = true)]
-public sealed class HostingStartupAttribute : Attribute
-{    
-    public HostingStartupAttribute(
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicParameterlessConstructor)] 
-        Type hostingStartupType)
-    {
-        // 如果 hosting startup type 为null，抛出异常
-        if (hostingStartupType == null)
-        {
-            throw new ArgumentNullException(nameof(hostingStartupType));
-        }
-        // 如果 hosting startup type 没有实现 IHostingStartup 接口，
-        // 抛出异常
-        if (!typeof(IHostingStartup).IsAssignableFrom(hostingStartupType))
-        {
-            throw new ArgumentException(
-                $@"""{hostingStartupType}"" 
-                does not implement {typeof(IHostingStartup)}.", 
-                nameof(hostingStartupType));
-        }
-        
-        HostingStartupType = hostingStartupType;
-    }
-    
-    
-    [DynamicallyAccessedMembers(
-        DynamicallyAccessedMemberTypes
-        	.PublicParameterlessConstructor)]
-    public Type HostingStartupType { get; }
-}
-
-```
-
-* IHostingStartup
-
-```c#
-public interface IHostingStartup
-{    
-    void Configure(IWebHostBuilder builder);
-}
-
-```
-
-###### 2.3.2.2 配置 host environm
+###### 2.2.2.2 加载 web host envrionment 配置并注入
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2140,7 +2012,7 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-###### 2.3.2.3 配置 configuration
+###### 2.2.2.3 执行 application configuration 中的配置并注入
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2167,7 +2039,7 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-###### 2.3.2.4 注入（web）服务
+###### 2.2.2.4 注入 web common service
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2208,7 +2080,7 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-###### 2.3.2.5 注入 IStartup
+###### 2.2.2.5 注入 IStartup
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2265,7 +2137,30 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-##### 2.3.3 get service provider from factory
+##### 2.2.3 clone service collection
+
+```c#
+internal static class ServiceCollectionExtensions
+{
+    public static IServiceCollection Clone(
+        this IServiceCollection serviceCollection)
+    {
+        IServiceCollection clone = new ServiceCollection();
+        foreach (var service in serviceCollection)
+        {
+            clone.Add(service);
+        }
+        return clone;
+    }
+}
+
+```
+
+##### 2.2.4 get service provider
+
+* 返回 default service provider
+* 或者第三方 service provider，
+  * （由注入的 service provider factory 创建）
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2290,7 +2185,10 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-##### 2.3.4 add application service
+##### 2.2.5 注入 applicaiton service
+
+* 注入 diagnostic listener
+* 注入 diagnostic source
 
 ```c#
 public class WebHostBuilder : IWebHostBuilder
@@ -2323,24 +2221,24 @@ public class WebHostBuilder : IWebHostBuilder
 
 ```
 
-#### 2.4 扩展方法
+#### 2.3 配置 builder 的扩展方法
 
-##### 2.4.1 configure application builder
+##### 2.3.1 web host builder extension
 
 ```c#
 public static class WebHostBuilderExtensions
 {
+    
     public static IWebHostBuilder Configure(
         this IWebHostBuilder hostBuilder, 
         Action<IApplicationBuilder> configureApp)
     {
         return hostBuilder.Configure(
             (_, app) => configureApp(app), 
-            configureApp
-            	.GetMethodInfo()
-            	.DeclaringType
-            	!.Assembly.GetName().Name!);
+            configureApp.GetMethodInfo()
+            	.DeclaringType!.Assembly.GetName().Name!);
     }
+    
     
     public static IWebHostBuilder Configure(
         this IWebHostBuilder hostBuilder, 
@@ -2348,10 +2246,8 @@ public static class WebHostBuilderExtensions
     {
         return hostBuilder.Configure(
             configureApp, 
-            configureApp
-            	.GetMethodInfo()
-            	.DeclaringType
-            	!.Assembly.GetName().Name!);
+            configureApp.GetMethodInfo()
+            	.DeclaringType!.Assembly.GetName().Name!);
     }
     
     private static IWebHostBuilder Configure(
@@ -2374,91 +2270,24 @@ public static class WebHostBuilderExtensions
             return supportsStartup.Configure(configureApp);
         }
         
-        return hostBuilder.ConfigureServices((context, services) =>
+        return hostBuilder.ConfigureServices((context, services) =>            
         	{
                 services.AddSingleton<IStartup>(sp =>
-                	{
-                        return new DelegateStartup(
-                            sp.GetRequiredService
-                            	<IServiceProviderFactory<IServiceCollection>>(), 
-                            (app => configureApp(context, app)));
-                    });
+                {
+                    return new DelegateStartup(
+                        sp.GetRequiredService
+                        	<IServiceProviderFactory<IServiceCollection>>(), 
+                        (app => configureApp(context, app)));
+                });
             });
     }
-}
-
-```
-
-##### 2.4.2 use startup
-
-###### 2.4.2.1 by startup
-
-```c#
-public static class WebHostBuilderExtensions
-{
+    
+    
     public static IWebHostBuilder UseStartup
         <[DynamicallyAccessedMembers(
-            StartupLinkerOptions.Accessibility)]TStartup>(
-        this IWebHostBuilder hostBuilder) where TStartup : class
-    {
-        return hostBuilder.UseStartup(typeof(TStartup));
-    }
-    
-    public static IWebHostBuilder UseStartup(
-        this IWebHostBuilder hostBuilder, 
-        [DynamicallyAccessedMembers(
-            StartupLinkerOptions.Accessibility)] Type startupType)
-    {
-        if (startupType == null)
-        {
-            throw new ArgumentNullException(nameof(startupType));
-        }
-        
-        var startupAssemblyName = startupType.Assembly.GetName().Name;
-        
-        hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
-        
-        // Light up the GenericWebHostBuilder implementation
-        if (hostBuilder is ISupportsStartup supportsStartup)
-        {
-            return supportsStartup.UseStartup(startupType);
-        }
-        
-        return hostBuilder
-            .ConfigureServices(services =>
-                {
-                    if (typeof(IStartup).IsAssignableFrom(startupType))
-                    {
-                        services.AddSingleton(typeof(IStartup), startupType);
-                    }
-                    else
-                    {
-                        services.AddSingleton(typeof(IStartup), sp =>
-                        {
-                            var hostingEnvironment = 
-                                sp.GetRequiredService<IHostEnvironment>();
-                            return new ConventionBasedStartup(
-                                StartupLoader.LoadMethods(
-                                    sp, 
-                                    startupType, 
-                                    hostingEnvironment.EnvironmentName));
-                        });
-                    }
-                });
-    }
-}
-```
-
-###### 2.4.2.2 with startup factory
-
-```c#
-public static class WebHostBuilderExtensions
-{ 
-    public static IWebHostBuilder 
-        UseStartup<[DynamicallyAccessedMembers(
             DynamicallyAccessedMemberTypes.PublicMethods)]TStartup>(
-        		this IWebHostBuilder hostBuilder, 
-        		Func<WebHostBuilderContext, TStartup> startupFactory) 
+        this IWebHostBuilder hostBuilder, 
+        Func<WebHostBuilderContext, TStartup> startupFactory) 
         	where TStartup : class
     {
         if (startupFactory == null)
@@ -2466,10 +2295,8 @@ public static class WebHostBuilderExtensions
             throw new ArgumentNullException(nameof(startupFactory));
         }
         
-        var startupAssemblyName = startupFactory
-            .GetMethodInfo()
-            .DeclaringType
-            !.Assembly.GetName().Name;
+        var startupAssemblyName = startupFactory.GetMethodInfo()
+            .DeclaringType!.Assembly.GetName().Name;
         
         hostBuilder.UseSetting(
             WebHostDefaults.ApplicationKey, 
@@ -2481,10 +2308,12 @@ public static class WebHostBuilderExtensions
             return supportsStartup.UseStartup(startupFactory);
         }
         
-        return hostBuilder
-            .ConfigureServices((context, services) =>
-                {
-                    services.AddSingleton(typeof(IStartup), sp =>
+        return hostBuilder.ConfigureServices(
+            (context, services) =>
+            {
+                services.AddSingleton(
+                    typeof(IStartup), 
+                    sp =>
                     {
                         var instance = startupFactory(context) 
                             ?? throw new InvalidOperationException(
@@ -2500,31 +2329,80 @@ public static class WebHostBuilderExtensions
 
                         return new ConventionBasedStartup(
                             StartupLoader.LoadMethods(
-                                sp, 
-                                instance.GetType(), 
+                                sp, instance.GetType(),
                                 hostingEnvironment.EnvironmentName, 
                                 instance));
                     });
-                }); 
-	}
-}
+            });
+    }
     
-```
-
-##### 2.4.3 use default service provider
-
-```c#
-public static class WebHostBuilderExtensions
-{
+    
+    public static IWebHostBuilder UseStartup(
+        this IWebHostBuilder hostBuilder, 
+        [DynamicallyAccessedMembers(
+            StartupLinkerOptions.Accessibility)] Type startupType)
+    {
+        if (startupType == null)
+        {
+            throw new ArgumentNullException(nameof(startupType));
+        }
+        
+        var startupAssemblyName = startupType.Assembly.GetName().Name;
+        
+        hostBuilder.UseSetting(
+            WebHostDefaults.ApplicationKey, 
+            startupAssemblyName);
+        
+        // Light up the GenericWebHostBuilder implementation
+        if (hostBuilder is ISupportsStartup supportsStartup)
+        {
+            return supportsStartup.UseStartup(startupType);
+        }
+        
+        return hostBuilder
+            .ConfigureServices(services =>
+            	{
+                    if (typeof(IStartup).IsAssignableFrom(startupType))
+                    {
+                        services.AddSingleton(typeof(IStartup), startupType);
+                    }
+                    else
+                    {
+                        services.AddSingleton(typeof(IStartup), sp =>
+                        {
+                            var hostingEnvironment = sp
+                                .GetRequiredService<IHostEnvironment>();
+                            
+                            return new ConventionBasedStartup(
+                                StartupLoader.LoadMethods(
+                                    sp, 
+                                    startupType,
+                                    hostingEnvironment.EnvironmentName));
+                        });
+                    }
+                });
+    }
+    
+    
+    public static IWebHostBuilder UseStartup<
+        [DynamicallyAccessedMembers(
+            StartupLinkerOptions.Accessibility)]TStartup>(
+        this IWebHostBuilder hostBuilder) 
+        	where TStartup : class
+    {
+        return hostBuilder.UseStartup(typeof(TStartup));
+    }
+    
+    
     public static IWebHostBuilder UseDefaultServiceProvider(
         this IWebHostBuilder hostBuilder, 
         Action<ServiceProviderOptions> configure)
     {
-        return hostBuilder.UseDefaultServiceProvider(
-            (context, options) => configure(options));
+        return hostBuilder
+            .UseDefaultServiceProvider((context, options) => configure(options));
     }
     
-        
+    
     public static IWebHostBuilder UseDefaultServiceProvider(
         this IWebHostBuilder hostBuilder, 
         Action<WebHostBuilderContext, ServiceProviderOptions> configure)
@@ -2537,26 +2415,17 @@ public static class WebHostBuilderExtensions
                 .UseDefaultServiceProvider(configure);
         }
         
-        return hostBuilder.ConfigureServices((context, services) =>
-        	{
-                var options = new ServiceProviderOptions();
-                configure(context, options);
-                
-                services.Replace(
-                    ServiceDescriptor.Singleton
-                    	<IServiceProviderFactory<IServiceCollection>>(
+        return hostBuilder.ConfigureServices((context, services) =>                                     	{
+            	var options = new ServiceProviderOptions();
+            	configure(context, options);                
+            	services.Replace(
+                    ServiceDescriptor.Singleton<
+                    	IServiceProviderFactory<IServiceCollection>>(
                             new DefaultServiceProviderFactory(options)));
-            });
+        	});
     }
-}
-
-```
-
-##### 2.4.4 configure app configuration
-
-```c#
-public static class WebHostBuilderExtensions
-{
+    
+    
     public static IWebHostBuilder ConfigureAppConfiguration(
         this IWebHostBuilder hostBuilder, 
         Action<IConfigurationBuilder> configureDelegate)
@@ -2564,21 +2433,14 @@ public static class WebHostBuilderExtensions
         return hostBuilder.ConfigureAppConfiguration(
             (context, builder) => configureDelegate(builder));
     }
-}
-
-```
-
-##### 2.4.5  configure logging
-
-```c#
-public static class WebHostBuilderExtensions
-{
+    
+    
     public static IWebHostBuilder ConfigureLogging(
         this IWebHostBuilder hostBuilder, 
         Action<ILoggingBuilder> configureLogging)
     {
-        return hostBuilder.ConfigureServices(collection => 
-        	collection.AddLogging(configureLogging));
+        return hostBuilder.ConfigureServices(
+            collection => collection.AddLogging(configureLogging));
     }
     
     
@@ -2586,28 +2448,20 @@ public static class WebHostBuilderExtensions
         this IWebHostBuilder hostBuilder, 
         Action<WebHostBuilderContext, ILoggingBuilder> configureLogging)
     {
-        return hostBuilder.ConfigureServices((context, collection) =>              
-           	collection.AddLogging(builder => 
+        return hostBuilder.ConfigureServices((context, collection) => 
+        	collection.AddLogging(builder => 
             	configureLogging(context, builder)));
     }
-}
-
-```
-
-##### 2.4.6 use static web assets
-
-```c#
-public static class WebHostBuilderExtensions
-{                                                                 
-    public static IWebHostBuilder UseStaticWebAssets(
-        this IWebHostBuilder builder)
+    
+    
+    public static IWebHostBuilder UseStaticWebAssets(this IWebHostBuilder builder)
     {
         builder.ConfigureAppConfiguration((context, configBuilder) =>
-        	{
-                StaticWebAssetsLoader.UseStaticWebAssets(
-                    context.HostingEnvironment, 
-                    context.Configuration);
-            });
+        {
+            StaticWebAssetsLoader.UseStaticWebAssets(
+                context.HostingEnvironment, 
+                context.Configuration);
+        });
         
         return builder;
     }
@@ -2615,44 +2469,540 @@ public static class WebHostBuilderExtensions
 
 ```
 
-### 2c. with  generic host
-
-#### 2.1 接口
-
-##### 2.1.1 support startup
+##### 2.3.2 hosing abastraction web host builder extension
 
 ```c#
-internal interface ISupportsStartup
+public static class HostingAbstractionsWebHostBuilderExtensions
 {
-    IWebHostBuilder Configure(
-        Action<WebHostBuilderContext, IApplicationBuilder> configure);
     
-    IWebHostBuilder UseStartup
-        ([DynamicallyAccessedMembers(
-            StartupLinkerOptions.Accessibility)] 
-         Type startupType);
+    public static IWebHostBuilder UseConfiguration(
+        this IWebHostBuilder hostBuilder, 
+        IConfiguration configuration)
+    {
+        foreach (var setting in 
+                 configuration.AsEnumerable(makePathsRelative: true))
+        {
+            hostBuilder.UseSetting(setting.Key, setting.Value);
+        }
+        
+        return hostBuilder;
+    }
     
-    IWebHostBuilder UseStartup
-        <[DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicMethods)]TStartup>(
-        Func<WebHostBuilderContext, TStartup> startupFactory);
+        
+    public static IWebHostBuilder CaptureStartupErrors(
+        this IWebHostBuilder hostBuilder, 
+        bool captureStartupErrors)
+    {
+        return hostBuilder.UseSetting(
+            WebHostDefaults.CaptureStartupErrorsKey, 
+            captureStartupErrors ? "true" : "false");
+    }
+    
+    
+    [RequiresUnreferencedCode(
+        "Types and members the loaded assembly depends on might be removed.")]
+    public static IWebHostBuilder UseStartup(
+        this IWebHostBuilder hostBuilder, 
+        string startupAssemblyName)
+    {
+        if (startupAssemblyName == null)
+        {
+            throw new ArgumentNullException(nameof(startupAssemblyName));
+        }
+        
+        return hostBuilder
+            .UseSetting(
+            	WebHostDefaults.ApplicationKey, 
+            	startupAssemblyName)
+            .UseSetting(
+            	WebHostDefaults.StartupAssemblyKey, 
+            	startupAssemblyName);
+    }
+    
+    
+    public static IWebHostBuilder UseServer(
+        this IWebHostBuilder hostBuilder, 
+        IServer server)
+    {
+        if (server == null)
+        {
+            throw new ArgumentNullException(nameof(server));
+        }
+        
+        return hostBuilder.ConfigureServices(services =>            
+        	{
+                // It would be nicer if this was transient but we need to pass in the
+                // factory instance directly
+                services.AddSingleton(server);
+            });
+    }
+    
+    
+    public static IWebHostBuilder UseEnvironment(
+        this IWebHostBuilder hostBuilder, 
+        string environment)
+    {
+        if (environment == null)
+        {
+            throw new ArgumentNullException(nameof(environment));
+        }
+        
+        return hostBuilder.UseSetting(
+            WebHostDefaults.EnvironmentKey, 
+            environment);
+    }
+    
+    
+    public static IWebHostBuilder UseContentRoot(
+        this IWebHostBuilder hostBuilder, 
+        string contentRoot)
+    {
+        if (contentRoot == null)
+        {
+            throw new ArgumentNullException(nameof(contentRoot));
+        }
+        
+        return hostBuilder.UseSetting(
+            WebHostDefaults.ContentRootKey, 
+            contentRoot);
+    }
+    
+    
+    public static IWebHostBuilder UseWebRoot(
+        this IWebHostBuilder hostBuilder, 
+        string webRoot)
+    {
+        if (webRoot == null)
+        {
+            throw new ArgumentNullException(nameof(webRoot));
+        }
+        
+        return hostBuilder.UseSetting(
+            WebHostDefaults.WebRootKey, 
+            webRoot);
+    }
+    
+    
+    public static IWebHostBuilder UseUrls(
+        this IWebHostBuilder hostBuilder, 
+        params string[] urls)
+    {
+        if (urls == null)
+        {
+            throw new ArgumentNullException(nameof(urls));
+        }
+        
+        return hostBuilder.UseSetting(
+            WebHostDefaults.ServerUrlsKey, 
+            string.Join(';', urls));
+    }
+    
+    
+    public static IWebHostBuilder PreferHostingUrls(
+        this IWebHostBuilder hostBuilder, 
+        bool preferHostingUrls)
+    {
+        return hostBuilder.UseSetting(
+            WebHostDefaults.PreferHostingUrlsKey, 
+            preferHostingUrls ? "true" : "false");
+    }
+    
+    
+    public static IWebHostBuilder SuppressStatusMessages(
+        this IWebHostBuilder hostBuilder, 
+        bool suppressStatusMessages)
+    {
+        return hostBuilder.UseSetting(
+            WebHostDefaults.SuppressStatusMessagesKey, 
+            suppressStatusMessages ? "true" : "false");
+    }
+    
+    
+    public static IWebHostBuilder UseShutdownTimeout(
+        this IWebHostBuilder hostBuilder, 
+        TimeSpan timeout)
+    {
+        return hostBuilder.UseSetting(
+            WebHostDefaults.ShutdownTimeoutKey, 
+            ((int)timeout.TotalSeconds).ToString(CultureInfo.InvariantCulture));
+    }
+    
+    
+    public static IWebHost Start(
+        this IWebHostBuilder hostBuilder, 
+        params string[] urls)
+    {
+        var host = hostBuilder.UseUrls(urls).Build();
+        host.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return host;
+    }
 }
 
 ```
 
-##### 2.1.2 support sue default service provider
+
+
+#### 2.4 web host builder 组件
+
+##### 2.6.1 web host builder context
 
 ```c#
-internal interface ISupportsUseDefaultServiceProvider
+public class WebHostBuilderContext
 {
-    IWebHostBuilder UseDefaultServiceProvider(
-        Action<WebHostBuilderContext, ServiceProviderOptions> configure);
+    public IWebHostEnvironment HostingEnvironment { get; set; } = default!;        
+    public IConfiguration Configuration { get; set; } = default!;
+}
+```
+
+##### 2.6.2 static web asset
+
+###### 2.6.2.1 static web asset loader
+
+```c#
+public class StaticWebAssetsLoader
+{
+    internal const string StaticWebAssetsManifestName = 
+        "Microsoft.AspNetCore.StaticWebAssets.xml";
+        
+    public static void UseStaticWebAssets(
+        IWebHostEnvironment environment, 
+        IConfiguration configuration)
+    {
+        // get maifest
+        using var manifest = ResolveManifest(environment, configuration);
+        if (manifest != null)
+        {
+            // manifast 为 null，使用 web access core
+            UseStaticWebAssetsCore(environment, manifest);
+        }
+    }
+    
+    /* 解析 manifest（stream） */        
+    
+    internal static Stream? ResolveManifest(
+        IWebHostEnvironment environment, 
+        IConfiguration configuration)
+    {
+        try
+        {
+            var manifestPath = configuration.GetValue<string>(
+                WebHostDefaults.StaticWebAssetsKey);
+            
+            var filePath = manifestPath ?? ResolveRelativeToAssembly(environment);            
+            if (filePath != null && File.Exists(filePath))
+            {
+                return File.OpenRead(filePath);
+            }
+            else
+            {
+                // A missing manifest might simply mean that the feature is not enabled, 
+                // so we simply return early. 
+                // Misconfigurations will be uncommon given that the entire process 
+                // is automated at build time.
+                return null;
+            }
+        }
+        catch
+        {
+            return null;
+        }
+    }
+    
+    private static string? ResolveRelativeToAssembly(
+        IWebHostEnvironment environment)
+    {
+        var assembly = Assembly.Load(environment.ApplicationName);
+        if (string.IsNullOrEmpty(assembly.Location))
+        {
+            return null;
+        }
+        
+        return Path.Combine(
+            Path.GetDirectoryName(assembly.Location)!, 
+            $"{environment.ApplicationName}.StaticWebAssets.xml");
+    }
+    
+    /* use static web asset core */
+    
+    internal static void UseStaticWebAssetsCore(
+        IWebHostEnvironment environment, 
+        Stream manifest)
+    {
+        var webRootFileProvider = environment.WebRootFileProvider;
+        
+        var additionalFiles = StaticWebAssetsReader
+            .Parse(manifest)
+            .Select(cr => 
+            	new StaticWebAssetsFileProvider(cr.BasePath, cr.Path))
+            // Upcast so we can insert on the resulting list.
+            .OfType<IFileProvider>() 
+            .ToList();
+        
+        if (additionalFiles.Count == 0)
+        {
+            return;
+        }
+        else
+        {
+            additionalFiles.Insert(0, webRootFileProvider);
+            environment.WebRootFileProvider = new CompositeFileProvider(additionalFiles);
+        }
+    }
 }
 
 ```
 
-#### 2.2 generic web host builder
+###### 2.6.2.2 static web asset file provider
+
+```c#
+internal class StaticWebAssetsFileProvider : IFileProvider
+{
+    private static readonly StringComparison FilePathComparison = 
+        OperatingSystem.IsWindows() 
+        	? StringComparison.OrdinalIgnoreCase 
+        	: StringComparison.Ordinal;
+    
+    public PathString BasePath { get; }
+    public PhysicalFileProvider InnerProvider { get; }
+    
+    public StaticWebAssetsFileProvider(
+        string pathPrefix, 
+        string contentRoot)
+    {
+        BasePath = NormalizePath(pathPrefix);
+        InnerProvider = new PhysicalFileProvider(contentRoot);
+    }                    
+    
+    /// <inheritdoc />
+    public IDirectoryContents GetDirectoryContents(string subpath)
+    {
+        var modifiedSub = NormalizePath(subpath);
+        
+        if (BasePath == "/")
+        {
+            return InnerProvider.GetDirectoryContents(modifiedSub);
+        }
+        
+        if (StartsWithBasePath(
+            	modifiedSub, 
+            	out var physicalPath))
+        {
+            return InnerProvider
+                .GetDirectoryContents(physicalPath.Value);
+        }
+        else if (string.Equals(subpath, string.Empty) || 
+                 string.Equals(modifiedSub, "/"))
+        {
+            return new StaticWebAssetsDirectoryRoot(BasePath);
+        }            
+        else if (BasePath.StartsWithSegments(
+            		modifiedSub, 
+            		FilePathComparison, 
+            		out var remaining))
+        {
+            return new StaticWebAssetsDirectoryRoot(remaining);
+        }
+        
+        return NotFoundDirectoryContents.Singleton;
+    }
+    
+    /// <inheritdoc />
+    public IFileInfo GetFileInfo(string subpath)
+    {
+        var modifiedSub = NormalizePath(subpath);
+        
+        if (BasePath == "/")
+        {
+            return InnerProvider.GetFileInfo(subpath);
+        }
+        
+        if (!StartsWithBasePath(
+            	modifiedSub, 
+            	out var physicalPath))
+        {
+            return new NotFoundFileInfo(subpath);
+        }
+        else
+        {
+            return InnerProvider.GetFileInfo(physicalPath.Value);
+        }
+    }
+    
+    /// <inheritdoc />
+    public IChangeToken Watch(string filter)
+    {
+        return InnerProvider.Watch(filter);
+    }
+    
+    private static string NormalizePath(string path)
+    {
+        path = path.Replace('\\', '/');
+        return path.StartsWith('/') ? path : "/" + path;
+    }
+    
+    private bool StartsWithBasePath(
+        string subpath, 
+        out PathString rest)
+    {
+        return new PathString(subpath)
+            .StartsWithSegments(
+            	BasePath, 
+            	FilePathComparison, 
+            	out rest);
+    }
+    
+    private class StaticWebAssetsDirectoryRoot : IDirectoryContents
+    {
+        private readonly string _nextSegment;
+                                                
+        public StaticWebAssetsDirectoryRoot(PathString remainingPath)
+        {
+            // We MUST use the Value property here because it is unescaped.
+            _nextSegment = remainingPath.Value
+                ?.Split(
+                	"/", 
+                	StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault() 
+                ?? string.Empty;
+        }
+        
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GenerateEnum();
+        }
+        
+        public IEnumerator<IFileInfo> GetEnumerator()
+        {
+            return GenerateEnum();
+        }
+                       
+        private IEnumerator<IFileInfo> GenerateEnum()
+        {
+            return new[] { new StaticWebAssetsFileInfo(_nextSegment) }
+            .Cast<IFileInfo>().GetEnumerator();
+        }
+        
+        private class StaticWebAssetsFileInfo : IFileInfo
+        {            
+            public string Name { get; }
+            public bool Exists => true;
+            public bool IsDirectory => true;
+            
+            public long Length => throw new NotImplementedException();            
+            public string PhysicalPath => throw new NotImplementedException();            
+            public DateTimeOffset LastModified => throw new NotImplementedException();
+            
+            public StaticWebAssetsFileInfo(string name)
+            {
+                Name = name;
+            }
+                                                                                   
+            public Stream CreateReadStream()
+            {
+                throw new NotImplementedException();
+            }
+        }
+    }
+}
+
+```
+
+###### 2.6.2.3 static web asset reader
+
+```c#
+internal static class StaticWebAssetsReader
+{
+    private const string ManifestRootElementName = "StaticWebAssets";
+    private const string VersionAttributeName = "Version";
+    private const string ContentRootElementName = "ContentRoot";
+        
+    internal static IEnumerable<ContentRootMapping> Parse(Stream manifest)
+    {
+        var document = XDocument.Load(manifest);
+        if (!string.Equals(
+            	document.Root!.Name.LocalName, 
+            	ManifestRootElementName, 
+            	StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Invalid manifest format. 
+                "Manifest root must be '{ManifestRootElementName}'");
+        }
+        
+        var version = document.Root.Attribute(VersionAttributeName);
+        if (version == null)
+        {
+            throw new InvalidOperationException(
+                $"Invalid manifest format. 
+                "Manifest root element must contain a version 
+                '{VersionAttributeName}' attribute");
+        }
+        
+        if (version.Value != "1.0")
+        {
+            throw new InvalidOperationException(
+                $"Unknown manifest version. Manifest version must be '1.0'");
+        }
+        
+        foreach (var element in document.Root.Elements())
+        {
+            if (!string.Equals(
+                element.Name.LocalName, 
+                ContentRootElementName, 
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid manifest format. 
+                    "Invalid element '{element.Name.LocalName}'. 
+                    "All {StaticWebAssetsLoader.StaticWebAssetsManifestName} 
+                    "child elements must be '{ContentRootElementName}' elements.");
+            }
+            if (!element.IsEmpty)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid manifest format. 
+                    "{ContentRootElementName} can't have content.");
+            }
+            
+            var basePath = ParseRequiredAttribute(element, "BasePath");
+            var path = ParseRequiredAttribute(element, "Path");
+            yield return new ContentRootMapping(basePath, path);
+        }
+    }
+    
+    private static string ParseRequiredAttribute(
+        XElement element, 
+        string attributeName)
+    {
+        var attribute = element.Attribute(attributeName);
+        if (attribute == null)
+        {
+            throw new InvalidOperationException(
+                $"Invalid manifest format. 
+                "Missing {attributeName} attribute in 
+                '{ContentRootElementName}' element.");
+        }
+        return attribute.Value;
+    }
+    
+    internal readonly struct ContentRootMapping
+    {
+        public ContentRootMapping(string basePath, string path)
+        {
+            BasePath = basePath;
+            Path = path;
+        }
+        
+        public string BasePath { get; }
+        public string Path { get; }
+    }
+}
+
+```
+
+### 2c. details - with generic host
+
+#### 2.1 generic web host builder
 
 ```c#
 internal class GenericWebHostBuilder : 
@@ -2670,9 +3020,10 @@ internal class GenericWebHostBuilder :
         
     // ...
 }
+
 ```
 
-##### 2.2.1 构造函数
+##### 2.1.1 构造函数
 
 ```c#
 internal class GenericWebHostBuilder
@@ -2684,17 +3035,17 @@ internal class GenericWebHostBuilder
         /* 注入 host builder */
         _builder = builder;
         
-        /* 加载 configuration */
-                        
-        /* 注册服务*/    
+        /* 加载（配置） configuration */
         
-        /* 加载 startup */
+        /* 配置 app configuration */
+                        
+        /* 注册服务*/                    
     }
 }
 
 ```
 
-###### 2.2.1.1 加载 configuration
+###### 2.1.1.1 加载 configuration
 
 ```c#
 internal class GenericWebHostBuilder
@@ -2727,7 +3078,20 @@ internal class GenericWebHostBuilder
             // wired up by calls to UseSetting
             ExecuteHostingStartups();
         });
-                
+    }
+}
+
+```
+
+###### 2.1.1.2 执行 hosting startup 中的配置
+
+```c#
+internal class GenericWebHostBuilder
+{
+    public GenericWebHostBuilder(
+        IHostBuilder builder, 
+        WebHostBuilderOptions options)
+    {
         // 如果 hosting startup web host builder 存在，
         // （在 execute hosting startup 中获取），
         // 配置host app configuration，
@@ -2738,6 +3102,7 @@ internal class GenericWebHostBuilder
             if (_hostingStartupWebHostBuilder != null)
             {
                 var webhostContext = GetWebHostBuilderContext(context);
+                
                 _hostingStartupWebHostBuilder
                     .ConfigureAppConfiguration(
                     	webhostContext, 
@@ -2749,7 +3114,7 @@ internal class GenericWebHostBuilder
 
 ```
 
-###### 2.2.1.2 注册服务
+###### 2.1.1.3 注册（配置）服务
 
 ```c#
 internal class GenericWebHostBuilder
@@ -2787,7 +3152,12 @@ internal class GenericWebHostBuilder
                 options.HostingStartupExceptions = _hostingStartupErrors;
             });
             
-            /* 注册服务 */
+            /* 注册服务 
+            	diagnostic listener
+            	diagnostic source
+            	http context factory
+            	middleware factory
+            	application builder factory */
             // REVIEW: This is bad since we don't own this type. 
             // Anybody could add one of these and it would mess things up
             // We need to flow this differently
@@ -2841,9 +3211,9 @@ internal class GenericWebHostBuilder
 
 ```
 
-##### 2.2.2 构造函数组件
+##### 2.1.2 构造函数组件方法
 
-###### 2.2.2.1 get web host builder context
+###### 2.1.2.1 get web host builder context
 
 ```c#
 internal class GenericWebHostBuilder
@@ -2887,7 +3257,7 @@ internal class GenericWebHostBuilder
 
 ```
 
-###### 2.2.2.2 exectue hosting startup
+###### 2.1.2.2 execute hosting startup
 
 ```c#
 internal class GenericWebHostBuilder
@@ -2947,7 +3317,9 @@ internal class GenericWebHostBuilder
 
 ```
 
-##### 2.2.3 web host builder 接口实现
+##### 2.1.3 web host builder 接口实现
+
+* 不能由 generic web host builder 构建 web host
 
 ```c#
 internal class GenericWebHostBuilder
@@ -3003,28 +3375,52 @@ internal class GenericWebHostBuilder
 
 ```
 
+##### 2.1.4 扩展接口 - support startup
 
+###### 2.1.4.1 接口
 
-##### 2.2.4 support startup 接口实现
+```c#
+internal interface ISupportsStartup
+{
+    IWebHostBuilder Configure(
+        Action<WebHostBuilderContext, IApplicationBuilder> configure);
+    
+    IWebHostBuilder UseStartup
+        ([DynamicallyAccessedMembers(
+            StartupLinkerOptions.Accessibility)] 
+         Type startupType);
+    
+    IWebHostBuilder UseStartup
+        <[DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicMethods)]TStartup>(
+        Func<WebHostBuilderContext, TStartup> startupFactory);
+}
 
-###### 2.2.4.1 configure
+```
+
+###### 2.1.4.2 实现
 
 ```c#
 internal class GenericWebHostBuilder
 {
+    /* configure application builder */
+    
     public IWebHostBuilder Configure(
             Action<WebHostBuilderContext, IApplicationBuilder> configure)
+    {
+        // Clear the startup type
+        _startupObject = configure;
+        
+        _builder.ConfigureServices((context, services) =>
         {
-            // Clear the startup type
-            _startupObject = configure;
-
-            _builder.ConfigureServices((context, services) =>
+            if (object.ReferenceEquals(_startupObject, configure))
             {
-                if (object.ReferenceEquals(_startupObject, configure))
-                {
-                    services.Configure<GenericWebHostServiceOptions>(options =>
-                    {
-                        var webhostBuilderContext = GetWebHostBuilderContext(context);
+                services.Configure<GenericWebHostServiceOptions>
+                    options =>
+                	{
+                    	var webhostBuilderContext = 
+                            etWebHostBuilderContext(context);
                         options.ConfigureApplication = 
                             app => configure(webhostBuilderContext, app);
                     });
@@ -3032,17 +3428,10 @@ internal class GenericWebHostBuilder
             });
 
             return this;
-        }
-
-}
-
-```
-
-###### 2.2.4.2 use startup
-
-```c#
-internal class GenericWebHostBuilder
-{
+    }
+    
+    /* use startup */
+    
     public IWebHostBuilder UseStartup(
         [DynamicallyAccessedMembers(
             StartupLinkerOptions.Accessibility)] Type startupType)
@@ -3086,15 +3475,7 @@ internal class GenericWebHostBuilder
         
         return this;
     }
-}
-
-```
-
-###### 2.2.4.3 use startup real did
-
-```c#
-internal class GenericWebHostBuilder
-{
+    
     [UnconditionalSuppressMessage(
         "ReflectionAnalysis", 
         "IL2006:UnrecognizedReflectionPattern", 
@@ -3211,15 +3592,7 @@ internal class GenericWebHostBuilder
             };
         });
     }
-}
-
-```
-
-###### 2.2.4.4 component in use startup
-
-```c#
-internal class GenericWebHostBuilder
-{
+    
     private void ConfigureContainerImpl<TContainer>(
             HostBuilderContext context, 
             TContainer container) 
@@ -3261,7 +3634,7 @@ internal class GenericWebHostBuilder
             {
                 return _context.Configuration;
             }
-            
+             
             return null;
         }
     }
@@ -3271,7 +3644,20 @@ internal class GenericWebHostBuilder
 
 
 
-##### 2.2.5 support default service provider 接口实现
+##### 2.1.5 扩展接口 - support default service provider
+
+###### 2.1.5.1 接口
+
+```c#
+internal interface ISupportsUseDefaultServiceProvider
+{
+    IWebHostBuilder UseDefaultServiceProvider(
+        Action<WebHostBuilderContext, ServiceProviderOptions> configure);
+}
+
+```
+
+###### 2.1.5.2 实现
 
 ```c#
 internal class GenericWebHostBuilder
@@ -3293,69 +3679,9 @@ internal class GenericWebHostBuilder
 
 ```
 
+#### 2.2 hosting startup web host builder
 
-
-
-
-
-
-
-
-
-
-##### 2.5.1 host 扩展 configure web host
-
-```c#
-public static class GenericHostWebHostBuilderExtensions
-{
-    
-    public static IHostBuilder ConfigureWebHost(
-        this IHostBuilder builder, 
-        Action<IWebHostBuilder> configure)
-    {
-        if (configure is null)
-        {
-            throw new ArgumentNullException(nameof(configure));
-        }
-        
-        return builder.ConfigureWebHost(configure, _ => { });
-    }
-    
-    
-    public static IHostBuilder ConfigureWebHost(
-        this IHostBuilder builder, 
-        Action<IWebHostBuilder> configure, 
-        Action<WebHostBuilderOptions> configureWebHostBuilder)
-    {
-        if (configure is null)
-        {
-            throw new ArgumentNullException(nameof(configure));
-        }
-        
-        if (configureWebHostBuilder is null)
-        {
-            throw new ArgumentNullException(nameof(configureWebHostBuilder));
-        }
-        
-        var webHostBuilderOptions = new WebHostBuilderOptions();
-        configureWebHostBuilder(webHostBuilderOptions);
-        
-        var webhostBuilder = new GenericWebHostBuilder(
-            builder, 
-            webHostBuilderOptions);
-        
-        configure(webhostBuilder);
-        
-        builder.ConfigureServices((context, services) => 
-        	services.AddHostedService<GenericWebHostService>());
-        
-        return builder;
-    }
-}
-
-```
-
-#### 2.3 hosting startup web host builder
+* 用于加载 hosting startup 关于web host builder 的配置
 
 ```c#
 internal class HostingStartupWebHostBuilder : 
@@ -3391,7 +3717,9 @@ internal class HostingStartupWebHostBuilder :
 
 ```
 
-##### 2.3.1 web host builder 接口实现
+##### 2.2.1 web host builder 接口实现
+
+* 不能由 hosting startup web host builder 创建 web host
 
 ```c#
 internal class HostingStartupWebHostBuilder
@@ -3434,7 +3762,7 @@ internal class HostingStartupWebHostBuilder
 
 ```
 
-##### 2.3.2  support startup 接口实现
+##### 2.2.2 support startup 接口实现
 
 ```c#
 internal class HostingStartupWebHostBuilder
@@ -3465,7 +3793,7 @@ internal class HostingStartupWebHostBuilder
 
 ```
 
-##### 2.3.3 support default service provider 接口实现
+##### 2.2.3 support default service provider 接口实现
 
 ```c#
 internal class HostingStartupWebHostBuilder
@@ -3480,9 +3808,10 @@ internal class HostingStartupWebHostBuilder
 
 ```
 
-#### 2.4 generic web hosted service
+#### 2.3 generic web host service
 
-##### 2.4.1 service
+* 作为 hosted service 的 web host 服务
+* 替代了 web host 执行 start 和 stop
 
 ```c#
 internal class GenericWebHostService : IHostedService    
@@ -3493,6 +3822,7 @@ internal class GenericWebHostService : IHostedService
     // Only for high level lifetime events
     public ILogger LifetimeLogger { get; }
     
+    /* web services */
     public DiagnosticListener DiagnosticListener { get; }
     public IHttpContextFactory HttpContextFactory { get; }
     public IApplicationBuilderFactory ApplicationBuilderFactory { get; }
@@ -3516,15 +3846,24 @@ internal class GenericWebHostService : IHostedService
         Logger = loggerFactory.CreateLogger("Microsoft.AspNetCore.Hosting.Diagnostics");
         LifetimeLogger = loggerFactory.CreateLogger("Microsoft.Hosting.Lifetime");
         
+        /* 注入 web service，
+           在 generic web host builder 中创建 */
         DiagnosticListener = diagnosticListener;
         HttpContextFactory = httpContextFactory;
         ApplicationBuilderFactory = applicationBuilderFactory;
         StartupFilters = startupFilters;
         Configuration = configuration;
         HostingEnvironment = hostingEnvironment;
-    }
-    
-        
+    }                        
+}
+
+```
+
+##### 2.3.1 start 
+
+```c#
+internal class GenericWebHostService : IHostedService    
+{
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         HostingEventSource.Log.HostStart();
@@ -3629,7 +3968,15 @@ internal class GenericWebHostService : IHostedService
             }
         }
     }
-    
+}
+
+```
+
+##### 2.3.2 stop
+
+```c#
+internal class GenericWebHostService : IHostedService    
+{
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         try
@@ -3642,10 +3989,10 @@ internal class GenericWebHostService : IHostedService
         }
     }
 }
-
+    
 ```
 
-##### 2.4.2 service options
+##### 2.3.3 service options
 
 ```c#
 internal class GenericWebHostServiceOptions
@@ -3659,19 +4006,273 @@ internal class GenericWebHostServiceOptions
 
 ```
 
+#### 2.4 Host 创建 web host service 静态方法
+
+```c#
+public static class GenericHostWebHostBuilderExtensions
+{
+    /// <summary>
+    /// Adds and configures an ASP.NET Core web application.
+    /// </summary>
+    public static IHostBuilder ConfigureWebHost(
+        this IHostBuilder builder, 
+        Action<IWebHostBuilder> configure)
+    {
+        if (configure is null)
+        {
+            throw new ArgumentNullException(nameof(configure));
+        }
+        
+        return builder.ConfigureWebHost(configure, _ => { });
+    }
+    
+    /// <summary>
+    /// Adds and configures an ASP.NET Core web application.
+    /// </summary>
+    public static IHostBuilder ConfigureWebHost(
+        this IHostBuilder builder, 
+        Action<IWebHostBuilder> configure, 
+        Action<WebHostBuilderOptions> configureWebHostBuilder)
+    {
+        if (configure is null)
+        {
+            throw new ArgumentNullException(nameof(configure));            
+        }        
+        if (configureWebHostBuilder is null)
+        {
+            throw new ArgumentNullException(nameof(configureWebHostBuilder));
+        }
+        
+        // 配置 web host builder options
+        var webHostBuilderOptions = new WebHostBuilderOptions();
+        configureWebHostBuilder(webHostBuilderOptions);
+        
+        // 配置 web host builder
+        var webhostBuilder = new GenericWebHostBuilder(builder, webHostBuilderOptions);
+        configure(webhostBuilder);
+        
+        // 注入 web host service
+        builder.ConfigureServices((context, services) => 
+        	services.AddHostedService<GenericWebHostService>());
+        return builder;
+    }
+}
+
+```
+
+### 2d. details - startup
+
+#### 2.1 IStartup
+
+##### 2.1.1 接口
+
+```c#
+public interface IStartup
+{    
+    IServiceProvider ConfigureServices(IServiceCollection services);         
+    void Configure(IApplicationBuilder app);
+}
+
+```
+
+##### 2.1.2 实现
+
+###### 2.a.2.1 startup base
+
+```c#
+public abstract class StartupBase : IStartup
+{            
+    IServiceProvider IStartup.ConfigureServices(IServiceCollection services)
+    {
+        ConfigureServices(services);
+        return CreateServiceProvider(services);
+    }
+    
+    public abstract void Configure(IApplicationBuilder app);
+    
+    public virtual void ConfigureServices(IServiceCollection services)
+    {
+    }
+        
+    public virtual IServiceProvider CreateServiceProvider(
+        IServiceCollection services)
+    {
+        return services.BuildServiceProvider();
+    }
+}
 
 
+public abstract class StartupBase<TBuilder> : 	
+	StartupBase where TBuilder : notnull
+{
+    private readonly IServiceProviderFactory<TBuilder> _factory;            
+    public StartupBase(IServiceProviderFactory<TBuilder> factory)
+    {
+        _factory = factory;
+    }
+        
+    public override IServiceProvider CreateServiceProvider(
+        IServiceCollection services)
+    {
+        var builder = _factory.CreateBuilder(services);
+        ConfigureContainer(builder);
+        return _factory.CreateServiceProvider(builder);
+    }
+        
+    public virtual void ConfigureContainer(TBuilder builder)
+    {
+    }
+}
 
+```
 
+###### 2.1.2.2 delegate startup
 
+```c#
+public class DelegateStartup : StartupBase<IServiceCollection>
+{
+    private Action<IApplicationBuilder> _configureApp;            
+    public DelegateStartup(
+        IServiceProviderFactory<IServiceCollection> factory, 
+        Action<IApplicationBuilder> configureApp) : 
+    		base(factory)
+    {
+        _configureApp = configureApp;
+    }
+            
+    public override void Configure(IApplicationBuilder app) => 
+        _configureApp(app);
+}
 
+```
 
+###### 2.1.2.3 convention statup
 
+```c#
+internal class ConventionBasedStartup : IStartup
+{
+    private readonly StartupMethods _methods;    
+    public ConventionBasedStartup(StartupMethods methods)
+    {
+        _methods = methods;
+    }
+    
+    public IServiceProvider ConfigureServices(
+        IServiceCollection services)
+    {
+        try
+        {
+            return _methods.ConfigureServicesDelegate(services);
+        }
+        catch (Exception ex)
+        {
+            if (ex is TargetInvocationException)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();
+            }
+            
+            throw;
+        }
+    }
+    
+    public void Configure(IApplicationBuilder app)
+    {
+        try
+        {
+            _methods.ConfigureDelegate(app);
+        }
+        catch (Exception ex)
+        {
+            if (ex is TargetInvocationException)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();
+            }
+            
+            throw;
+        }
+    }        
+}
 
+```
 
+##### 2.1.3 startup method
 
+```c#
+internal class StartupMethods
+{
+    public object? StartupInstance { get; }
+    public Func<IServiceCollection, IServiceProvider> ConfigureServicesDelegate { get; }        
+    public Action<IApplicationBuilder> ConfigureDelegate { get; }
+    
+    public StartupMethods(
+        object? instance, 
+        Action<IApplicationBuilder> configure, 
+        Func<IServiceCollection, IServiceProvider> configureServices)
+    {
+        Debug.Assert(configure != null);
+        Debug.Assert(configureServices != null);
+        
+        StartupInstance = instance;
+        ConfigureDelegate = configure;
+        ConfigureServicesDelegate = configureServices;
+    }            
+}
 
+```
 
+##### 2.1.4 hosting startup
+
+###### 2.1.4.1 attribute
+
+```c#
+[AttributeUsage(
+    AttributeTargets.Assembly, 
+    Inherited = false, 
+    AllowMultiple = true)]
+public sealed class HostingStartupAttribute : Attribute
+{    
+    [DynamicallyAccessedMembers(
+        DynamicallyAccessedMemberTypes
+        	.PublicParameterlessConstructor)]
+    public Type HostingStartupType { get; }
+    
+    public HostingStartupAttribute(
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes
+            	.PublicParameterlessConstructor)] Type hostingStartupType)
+    {
+        if (hostingStartupType == null)
+        {
+            throw new ArgumentNullException(nameof(hostingStartupType));
+        }
+        
+        if (!typeof(IHostingStartup).IsAssignableFrom(hostingStartupType))
+        {
+            throw new ArgumentException(
+                $@"""{hostingStartupType}"" does not implement 
+                ""{typeof(IHostingStartup)}.", 
+                nameof(hostingStartupType));
+        }
+        
+        HostingStartupType = hostingStartupType;        
+    }        
+}
+
+```
+
+###### 2.1.4.2 IHostingStartup
+
+```c#
+public interface IHostingStartup
+{    
+    void Configure(IWebHostBuilder builder);
+}
+
+```
+
+#### 2.2 创建 startup
+
+##### 2.2.1 startup loader
 
 
 

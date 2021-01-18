@@ -89,6 +89,8 @@ public interface IHost : IDisposable
 
 ##### 2.1.2 Host 实现
 
+* 从`host builder`中解析并注入服务到`host`
+
 ```c#
 internal class Host : IHost, IAsyncDisposable
 {
