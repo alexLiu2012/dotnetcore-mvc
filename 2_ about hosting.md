@@ -11,34 +11,37 @@
 
 #### 1.1 summary
 
-* ms 提供的托管应用的宿主服务
-* 用于运行托管的应用（hosted service）
-* 统一管理应用的生命周期
+程序运行后变成进程，并由操作系统控制其运行、销毁。
+
+面向框架的程序设计，首先要构建一个可以运行的程序容器。它本身可以受操作系统控制，针对不同的操作系统设计不同的 lifetime ；同时容器可以托管管需要运行的子程序（服务），并控制这些子程序（服务）的 lifetime；该容器还应该是自身及托管的服务读取外界配置的代理。
+
+generic host 就是这样的容器，它是 microsoft 提供的 web application 宿主。
 
 #### 1.2 how designed
 
 ##### 1.2.1 host
 
-* 通用主机，同于运行托管的应用
-* 封装了如下组件：
+* 通用主机，容器宿主，封装了如下组件：
 
 ###### 1.2.1.1 host lifetime
 
 * 控制 host 的生命周期，
 
-###### 1.2.1.2 hosted service
+###### 1.2.1.2 configuration & options
 
-* 需要 host 运行的托管的应用
+* 读取外界配置，
+* 封装为 强类型 参数
 
-###### 1.2.1.3 host application lifetime
+###### 1.2.1.2 hosted service & host application lifetime
 
-* 控制 hosted service 的生命周期
-* 由其创建 cancellation token，作为参数传入 hosted service 的 start 方法中
+* 需要 host 运行的托管的应用，
+* 其 生命周期
 
 ###### 1.2.1.4 service provider
 
 * di，用于解析上述组件
 * 组件在 host builder 构建 host 时注入
+* host 本身也是注入 di 中
 
 ##### 1.2.2 host builder
 
@@ -88,8 +91,6 @@ public interface IHost : IDisposable
 ```
 
 ##### 2.1.2 Host 实现
-
-* 从`host builder`中解析并注入服务到`host`
 
 ```c#
 internal class Host : IHost, IAsyncDisposable
@@ -156,31 +157,29 @@ internal class Host : IHost, IAsyncDisposable
         
         using var combinedCancellationTokenSource = 
             CancellationTokenSource.CreateLinkedTokenSource(
-            	cancellationToken, 
-            	_applicationLifetime.ApplicationStopping);
+            							cancellationToken, 
+						            	_applicationLifetime.ApplicationStopping);
         
         CancellationToken combinedCancellationToken = 
             combinedCancellationTokenSource.Token;
         
         /* 启动 host lifetime */
         
-        await _hostLifetime.WaitForStartAsync(
-            combinedCancellationToken).ConfigureAwait(false);
+        await _hostLifetime.WaitForStartAsync(combinedCancellationToken)
+            			   .ConfigureAwait(false);
         
         combinedCancellationToken.ThrowIfCancellationRequested();
         
         /* 启动 hosted services */
         
         // 解析 hosted service
-        _hostedServices = 
-            Services.GetService<IEnumerable<IHostedService>>();
+        _hostedServices = Services.GetService<IEnumerable<IHostedService>>();
         
         foreach (IHostedService hostedService in _hostedServices)
         {
             // Fire IHostedService.Start
-            await hostedService
-                .StartAsync(combinedCancellationToken)
-                	.ConfigureAwait(false);
+            await hostedService.StartAsync(combinedCancellationToken)
+                			   .ConfigureAwait(false);
             
             if (hostedService is BackgroundService backgroundService)
             {
@@ -224,7 +223,9 @@ internal class Host : IHost, IAsyncDisposable
         
         using (var cts = new CancellationTokenSource(_options.ShutdownTimeout))       
         using (var linkedCts = CancellationTokenSource
-               .CreateLinkedTokenSource(cts.Token, cancellationToken))
+               					   .CreateLinkedTokenSource(
+                                        cts.Token, 
+                                       	cancellationToken))
         {
             // 创建 cancellatino token 
             CancellationToken token = linkedCts.Token;
@@ -241,7 +242,8 @@ internal class Host : IHost, IAsyncDisposable
                 {
                     try
                     {
-                        await hostedService.StopAsync(token).ConfigureAwait(false);
+                        await hostedService.StopAsync(token)
+                            			   .ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -257,7 +259,8 @@ internal class Host : IHost, IAsyncDisposable
             /* 停止 host lifetime，记录 exceptions，抛出 */
             try
             {
-                await _hostLifetime.StopAsync(token).ConfigureAwait(false);
+                await _hostLifetime.StopAsync(token)
+                    			   .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -267,7 +270,9 @@ internal class Host : IHost, IAsyncDisposable
             if (exceptions.Count > 0)
             {
                 var ex = new AggregateException(
-                    "One or more hosted services failed to stop.", exceptions);
+                    "One or more hosted services failed to stop.", 
+                    exceptions);
+                
                 _logger.StoppedWithException(ex);
                 throw ex;
             }
@@ -285,14 +290,17 @@ internal class Host : IHost, IAsyncDisposable
 internal class Host : IHost, IAsyncDisposable
 {
     public void Dispose() => 
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
+        DisposeAsync().AsTask()
+        			  .GetAwaiter()
+        			  .GetResult();
     
     public async ValueTask DisposeAsync()
     {
         switch (Services)
         {
             case IAsyncDisposable asyncDisposable:
-                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                await asyncDisposable.DisposeAsync()
+                    				 .ConfigureAwait(false);
                 break;
             case IDisposable disposable:
                 disposable.Dispose();
@@ -316,7 +324,9 @@ public static class HostingAbstractionsHostExtensions
 {
     public static void Start(this IHost host)
     {
-        host.StartAsync().GetAwaiter().GetResult();
+        host.StartAsync()
+            .GetAwaiter()
+            .GetResult();
     }
 }
 
@@ -334,12 +344,14 @@ public static class HostingAbstractionsHostExtensions
         // 从 host 的 service provider 中解析 IHostApplicationLifetime
         // 其在 host builder 中注入
         IHostApplicationLifetime applicationLifetime = 
-            host.Services.GetService<IHostApplicationLifetime>();
+            host.Services
+            	.GetService<IHostApplicationLifetime>();
         
-        token.Register(state =>
-        	{
-                ((IHostApplicationLifetime)state).StopApplication();
-            },
+        token.Register(
+            state =>
+        		{
+                    ((IHostApplicationLifetime)state).StopApplication();
+                },
             applicationLifetime);
         
         var waitForStop = new TaskCompletionSource<object>(
@@ -359,12 +371,15 @@ public static class HostingAbstractionsHostExtensions
         // Host will use its default ShutdownTimeout if none is specified.
         // The cancellation token may have been triggered to unblock waitForStop. 
         // Don't pass it here because that would trigger an abortive shutdown.
-        await host.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        await host.StopAsync(CancellationToken.None)
+            	  .ConfigureAwait(false);
     }
     
     public static void WaitForShutdown(this IHost host)
     {
-        host.WaitForShutdownAsync().GetAwaiter().GetResult();
+        host.WaitForShutdownAsync()
+            .GetAwaiter()
+            .GetResult();
     }
 }
 
@@ -384,16 +399,19 @@ public static class HostingAbstractionsHostExtensions
         try
         {
             // start host
-            await host.StartAsync(token).ConfigureAwait(false);            
+            await host.StartAsync(token)
+                	  .ConfigureAwait(false);            
             // keep await
-            await host.WaitForShutdownAsync(token).ConfigureAwait(false);
+            await host.WaitForShutdownAsync(token)
+                	  .ConfigureAwait(false);
         }
         finally
         {
             // dispose host
             if (host is IAsyncDisposable asyncDisposable)
             {
-                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                await asyncDisposable.DisposeAsync()
+                    				 .ConfigureAwait(false);
             }
             else
             {
@@ -404,7 +422,9 @@ public static class HostingAbstractionsHostExtensions
     
     public static void Run(this IHost host)
     {
-        host.RunAsync().GetAwaiter().GetResult();
+        host.RunAsync()
+            .GetAwaiter()
+            .GetResult();
     }
 }
 
@@ -418,7 +438,8 @@ public static class HostingAbstractionsHostExtensions
     public static async Task StopAsync(this IHost host, TimeSpan timeout)
     {
         using CancellationTokenSource cts = new CancellationTokenSource(timeout);
-        await host.StopAsync(cts.Token).ConfigureAwait(false);
+        await host.StopAsync(cts.Token)
+            	  .ConfigureAwait(false);
     }
 }
 
@@ -481,8 +502,8 @@ public abstract class BackgroundService : IHostedService, IDisposable
     public virtual Task StartAsync(CancellationToken cancellationToken)
     {
         // Create linked token to allow cancelling executing task from provided token
-        _stoppingCts = CancellationTokenSource
-            .CreateLinkedTokenSource(cancellationToken);
+        _stoppingCts = CancellationTokenSource      
+            			   .CreateLinkedTokenSource(cancellationToken);
         
         // Store the task we're executing
         _executeTask = ExecuteAsync(_stoppingCts.Token);

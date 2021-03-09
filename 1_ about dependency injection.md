@@ -11,6 +11,12 @@
 
 #### 1.1 summary
 
+IoC 是现代程序设计框架都会采用的设计模式（其实不能称其为设计模式）。
+
+它反转了控制关系，由程序 application（programmer 控制）反转为框架控制，即框架会自动注入模块需要的依赖项，programmer 只需要集中精力在其关注的模块（方法）即可。
+
+在 dotnet core 之前已经存在很多优秀的 ioc (di) 框架，如 autofac、wisdow castle，dotnet core 自己也实现了 di，并且支持集成其他 ioc 框架
+
 * .net core 实现了 dependency injection
 * DI 是 .net core 以及 asp.net core 程序的基础
 * 尽量使用 di 注册、解析服务（object），因为 di 可以
@@ -680,9 +686,7 @@ public class ServiceCollection : IServiceCollection
        
     /* enumerator */
                 
-    /* crud */ 
-    
-    
+    /* crud */         
 }
 
 ```
@@ -765,10 +769,6 @@ public class ServiceCollection : IServiceCollection
 
 ```
 
-
-
-
-
 ##### 2.2.3 扩展方法 by descriptor
 
 ###### 2.2.3.1 add 
@@ -815,66 +815,7 @@ public static class ServiceCollectionDescriptorExtensions
         }
         
         return collection;
-    }
-
-    
-
-    
-   
-        
-        
-        
-        
-        
-        
-        
-        
-
-        
-        public static IServiceCollection Replace(
-            this IServiceCollection collection,
-            ServiceDescriptor descriptor)
-        {
-            if (collection == null)
-            {
-                throw new ArgumentNullException(nameof(collection));
-            }
-
-            if (descriptor == null)
-            {
-                throw new ArgumentNullException(nameof(descriptor));
-            }
-
-            // Remove existing
-            int count = collection.Count;
-            for (int i = 0; i < count; i++)
-            {
-                if (collection[i].ServiceType == descriptor.ServiceType)
-                {
-                    collection.RemoveAt(i);
-                    break;
-                }
-            }
-
-            collection.Add(descriptor);
-            return collection;
-        }
-
-        /// <summary>
-        /// Removes all services of type <typeparamref name="T"/> in <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="collection">The <see cref="IServiceCollection"/>.</param>
-        /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
-        
-
-        /// <summary>
-        /// Removes all services of type <paramref name="serviceType"/> in <see cref="IServiceCollection"/>.
-        /// </summary>
-        /// <param name="collection">The <see cref="IServiceCollection"/>.</param>
-        /// <param name="serviceType">The service type to remove.</param>
-        /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
-        
-    }
+    }                                                                                            }
 ```
 
 ###### 2.2.3.2 try add
@@ -1041,6 +982,43 @@ public static class ServiceCollectionDescriptorExtensions
     {
         return RemoveAll(collection, typeof(T));
     }
+}
+
+```
+
+###### 2.3.3.5 replace
+
+```c#
+public static class ServiceCollectionServiceExtensions
+{
+     public static IServiceCollection Replace(
+         this IServiceCollection collection,
+         ServiceDescriptor descriptor)
+     {
+         if (collection == null)
+         {
+             throw new ArgumentNullException(nameof(collection));
+         }         
+         if (descriptor == null)
+         {
+             throw new ArgumentNullException(nameof(descriptor));
+         }
+         
+         // Remove existing
+         int count = collection.Count;
+         for (int i = 0; i < count; i++)
+         {
+             if (collection[i].ServiceType == descriptor.ServiceType)
+             {
+                 collection.RemoveAt(i);
+                 break;
+             
+             }
+         }
+         
+         collection.Add(descriptor);
+         return collection;
+     }
 }
 
 ```
@@ -3646,6 +3624,10 @@ var host = hostBuilder.Build();
 #### 3.3 解析服务
 
 ##### 3.3.1 通过 IServiceProvider 解析
+
+* 解析 object
+* 解析 T
+* 解析 IEnumerate<T>
 
 ##### 3.3.2 通过 activator utilities 创建
 

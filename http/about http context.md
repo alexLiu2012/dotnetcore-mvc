@@ -73,14 +73,11 @@
 
 #### 2.1 http context
 
-* 对 http 协议的建模
-
-##### 2.1.1 抽象基类
-
 ```c#
 public abstract class HttpContext
 {    
-    public abstract IFeatureCollection Features { get; }        
+    public abstract IFeatureCollection Features { get; }   
+    
     public abstract HttpRequest Request { get; }        
     public abstract HttpResponse Response { get; }        
     public abstract ConnectionInfo Connection { get; }            
@@ -99,315 +96,393 @@ public abstract class HttpContext
 
 ```
 
-##### 2.1.2 默认实现
+##### 2.1.1 http authentication feature
+
+###### 2.1.1.1 接口
 
 ```c#
-public sealed class DefaultHttpContext : HttpContext
+public interface IHttpAuthenticationFeature
 {    
-    private FeatureReferences<FeatureInterfaces> _features;        
-    struct FeatureInterfaces
-    {
-        public IItemsFeature? Items;
-        public IServiceProvidersFeature? ServiceProviders;
-        public IHttpAuthenticationFeature? Authentication;
-        public IHttpRequestLifetimeFeature? Lifetime;
-        public ISessionFeature? Session;
-        public IHttpRequestIdentifierFeature? RequestIdentifier;
-    }        
-    private readonly DefaultHttpRequest _request;
-    private readonly DefaultHttpResponse _response;    
-    private DefaultConnectionInfo? _connection;
-    private DefaultWebSocketManager? _websockets;
-                       
-    /* 构造函数 */
-    
-    // 构建 request、response，初始化 feature collection
-    public DefaultHttpContext(IFeatureCollection features)
-    {
-        _features.Initalize(features);
-        _request = new DefaultHttpRequest(this);
-        _response = new DefaultHttpResponse(this);
-    }
-    // 然后，在 feature collection 中注册
-    //   request feature,
-    //   response feature,
-    //   response body feautre
-    public DefaultHttpContext() : this(new FeatureCollection())
-    {
-        Features.Set<IHttpRequestFeature>(
-            new HttpRequestFeature());
-        Features.Set<IHttpResponseFeature>(
-            new HttpResponseFeature());
-        Features.Set<IHttpResponseBodyFeature>(
-            new StreamResponseBodyFeature(Stream.Null));
-    }
-            
-    /* 方法 */    
-    
-    public void Initialize(IFeatureCollection features)
-    {
-        var revision = features.Revision;
-        _features.Initalize(features, revision);
-        _request.Initialize(revision);
-        _response.Initialize(revision);
-        _connection?.Initialize(features, revision);
-        _websockets?.Initialize(features, revision);
-    }
-        
-    public void Uninitialize()
-    {
-        _features = default;
-        _request.Uninitialize();
-        _response.Uninitialize();
-        _connection?.Uninitialize();
-        _websockets?.Uninitialize();
-    }                                                  
-       
-    public override void Abort()
-    {
-        LifetimeFeature.Abort();
-    }                        
+    ClaimsPrincipal? User { get; set; }
 }
 
 ```
 
-###### 2.1.2.1 公共属性
+###### 2.1.1.2 实现
 
 ```c#
-public sealed class DefaultHttpContext : HttpContext
+ public class HttpAuthenticationFeature : IHttpAuthenticationFeature
+ {
+     /// <inheritdoc />
+     public ClaimsPrincipal? User { get; set; }
+ }
+
+```
+
+##### 2.1.2 items feature
+
+###### 2.1.2.1 接口
+
+```c#
+public interface IItemsFeature
+{    
+    IDictionary<object, object?> Items { get; set; }
+}
+
+```
+
+###### 2.1.2.2 实现
+
+```c#
+public class ItemsFeature : IItemsFeature
 {
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public HttpContext HttpContext => this;
+    /// <inheritdoc />
+    public IDictionary<object, object?> Items { get; set; }
     
-    // basic 
-    
-    public override IFeatureCollection Features => 
-        _features.Collection ?? ContextDisposed();     
-    private static IFeatureCollection ContextDisposed()
+    public ItemsFeature()
     {
-        ThrowContextDisposed();
-        return null;
-    }
-    [DoesNotReturn]
-    private static void ThrowContextDisposed()
+        Items = new ItemsDictionary();
+    }        
+}
+
+```
+
+###### 2.1.2.3 item dictionary
+
+```c#
+internal class ItemsDictionary : IDictionary<object, object?>
+{
+    // 静态 empty 实例
+    private static class EmptyDictionary
     {
-        throw new ObjectDisposedException(
-            nameof(HttpContext), 
-            $"Request has finished and {nameof(HttpContext)} disposed.");
+        // In own class so only initalized if CopyTo is called on an empty ItemsDictionary
+        public readonly static IDictionary<object, object?> Dictionary = 
+            new Dictionary<object, object?>();
+        public static ICollection<KeyValuePair<object, object?>> Collection => Dictionary;
     }
     
-    public override HttpRequest Request => _request;        
+    private IDictionary<object, object?>? _items;
+    public IDictionary<object, object?> Items => this;
     
-    public override HttpResponse Response => _response;        
+    int ICollection<KeyValuePair<object, object?>>.Count => _items?.Count ?? 0;    
+    bool ICollection<KeyValuePair<object, object?>>.IsReadOnly => _items?.IsReadOnly ?? false;
     
-    public override ConnectionInfo Connection => 
-        _connection ?? (_connection = new DefaultConnectionInfo(Features));        
-    
-    public override WebSocketManager WebSockets => 
-        _websockets ?? (_websockets = new DefaultWebSocketManager(Features));
-    
-    // advanced
-    
-    public override ClaimsPrincipal User
+    ICollection<object> IDictionary<object, object?>.Keys
     {
         get
         {
-            var user = HttpAuthenticationFeature.User;
-            if (user == null)
+            if (_items == null)
             {
-                user = new ClaimsPrincipal(new ClaimsIdentity());
-                HttpAuthenticationFeature.User = user;
+                return EmptyDictionary.Dictionary.Keys;
             }
-            return user;
-        }
-        set 
-        { 
-            HttpAuthenticationFeature.User = value; 
-        }
-    }
-        
-    public override IDictionary<object, object?> Items
-    {
-        get 
-        { 
-            return ItemsFeature.Items; 
-        }
-        set 
-        { 
-            ItemsFeature.Items = value; 
-        }
-    }
-        
-    public override IServiceProvider RequestServices
-    {
-        get 
-        { 
-            return ServiceProvidersFeature.RequestServices; 
-        }
-        set 
-        { 
-            ServiceProvidersFeature.RequestServices = value; 
+            
+            return _items.Keys;
         }
     }
     
-    public override CancellationToken RequestAborted
-    {
-        get 
-        { 
-            return LifetimeFeature.RequestAborted; 
-        }
-        set 
-        { 
-            LifetimeFeature.RequestAborted = value; 
-        }
-    }
-        
-    public override string TraceIdentifier
-    {
-        get 
-        { 
-            return RequestIdentifierFeature.TraceIdentifier; 
-        }
-        set 
-        { 
-            RequestIdentifierFeature.TraceIdentifier = value; 
-        }
-    }
-        
-    public override ISession Session
+    ICollection<object?> IDictionary<object, object?>.Values
     {
         get
         {
-            var feature = SessionFeatureOrNull;
-            if (feature == null)
+            if (_items == null)
             {
-                throw new InvalidOperationException(
-                    "Session has not been configured for this application " +  
-                    "or request.");
+                return EmptyDictionary.Dictionary.Values;
             }
-            return feature.Session;
+            
+            return _items.Values;
+        }
+    }
+    
+    // Replace the indexer with one that returns null for missing values
+    object? IDictionary<object, object?>.this[object key]
+    {
+        get
+        {
+            if (_items != null && _items.TryGetValue(key, out var value))
+            {
+                return value;
+            }
+            return null;
         }
         set
         {
-            SessionFeature.Session = value;
+            EnsureDictionary();
+            _items[key] = value;
         }
-    }    
+    }
     
-    // more
-    
-    public FormOptions FormOptions { get; set; } = default!;        
-    public IServiceScopeFactory ServiceScopeFactory { get; set; } = default!;
-}
-
-```
-
-###### 2.1.2.2 features
-
-* 从 feature collection 中获取，
-* 如果没有，创建 default（_newXxxFeature）
-
-```c#
-public sealed class DefaultHttpContext : HttpContext
-{
-    // private property
-    
-    private IItemsFeature ItemsFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Items, 
-        	_newItemsFeature)!;
-    
-    private IServiceProvidersFeature ServiceProvidersFeature =>
-        _features.Fetch(
-        	ref _features.Cache.ServiceProviders, 
-        	this, 
-        	_newServiceProvidersFeature)!;
-    
-    private IHttpAuthenticationFeature HttpAuthenticationFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Authentication, 
-        	_newHttpAuthenticationFeature)!;
-    
-    private IHttpRequestLifetimeFeature LifetimeFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Lifetime, 
-        	_newHttpRequestLifetimeFeature)!;
-
-    private ISessionFeature SessionFeature =>        
-        _features.Fetch(
-        	ref _features.Cache.Session, 
-        	_newSessionFeature)!;
-
-    private ISessionFeature? SessionFeatureOrNull =>
-        _features.Fetch(
-        	ref _features.Cache.Session, 
-        	_nullSessionFeature);
-
-    private IHttpRequestIdentifierFeature RequestIdentifierFeature =>
-        _features.Fetch(
-        	ref _features.Cache.RequestIdentifier, 
-        	_newHttpRequestIdentifierFeature)!;
-    
-    // default
-    
-    private readonly static Func<IFeatureCollection, IItemsFeature> 
-        _newItemsFeature = f => 
-        	new ItemsFeature();
-    
-    private readonly static Func<DefaultHttpContext, IServiceProvidersFeature> 
-        _newServiceProvidersFeature = context => 
-        	new RequestServicesFeature(
-        		context, 
-        		context.ServiceScopeFactory);
-    
-    private readonly static Func<IFeatureCollection, IHttpAuthenticationFeature> 
-        _newHttpAuthenticationFeature = f => 
-        	new HttpAuthenticationFeature();
-    
-    private readonly static Func<IFeatureCollection, IHttpRequestLifetimeFeature> 
-        _newHttpRequestLifetimeFeature = f => 
-        	new HttpRequestLifetimeFeature();
-    
-    private readonly static Func<IFeatureCollection, ISessionFeature> 
-        _newSessionFeature = f => 
-        	new DefaultSessionFeature();
-    
-    private readonly static Func<IFeatureCollection, ISessionFeature?> 
-        _nullSessionFeature = f => null;
-    
-    private readonly static Func<IFeatureCollection, IHttpRequestIdentifierFeature> 
-        _newHttpRequestIdentifierFeature = f => 
-        	new HttpRequestIdentifierFeature();
-}
-
-```
-
-##### 2.1.3 扩展方法
-
-```c#
-public static class HttpContextServerVariableExtensions
-{    
-    public static string? GetServerVariable(
-        this HttpContext context, 
-        string variableName)
+    [MemberNotNull(nameof(_items))]
+    private void EnsureDictionary()
     {
-        var feature = context.Features.Get<IServerVariablesFeature>();
-        
-        if (feature == null)
+        if (_items == null)
         {
-            return null;
+            _items = new Dictionary<object, object?>();
+        }
+    }
+    
+        
+    public ItemsDictionary()
+    {        
+    }
+    
+    public ItemsDictionary(IDictionary<object, object?> items)
+    {
+        _items = items;
+    }
+    
+    
+    
+    
+    
+    void IDictionary<object, object?>.Add(object key, object? value)
+    {
+        EnsureDictionary();
+        _items.Add(key, value);
+    }
+    
+    void ICollection<KeyValuePair<object, object?>>.Add(KeyValuePair<object, object?> item)
+    {
+        EnsureDictionary();
+        _items.Add(item);
+    }
+    
+    void ICollection<KeyValuePair<object, object?>>.Clear() => _items?.Clear();
+    
+    bool IDictionary<object, object?>.Remove(object key) => 
+        _items != null && _items.Remove(key);
+            
+    bool ICollection<KeyValuePair<object, object?>>.Remove(KeyValuePair<object, object?> item)
+    {
+        if (_items == null)
+        {
+            return false;
         }
         
-        return feature[variableName];
+        if (_items.TryGetValue(item.Key, out var value) && 
+            Equals(item.Value, value))
+        {
+            return _items.Remove(item.Key);
+        }
+        return false;
+    }
+    
+    bool ICollection<KeyValuePair<object, object?>>.Contains(
+        KeyValuePair<object, object?> item) => _items != null && _items.Contains(item);
+    
+    bool IDictionary<object, object?>.ContainsKey(object key) => 
+        _items != null && _items.ContainsKey(key);
+    
+    bool IDictionary<object, object?>.TryGetValue(object key, out object? value)
+    {
+        value = null;
+        return _items != null && _items.TryGetValue(key, out value);
+    }
+                                    
+    void ICollection<KeyValuePair<object, object?>>.CopyTo(
+        KeyValuePair<object, object?>[] array, int arrayIndex)
+    {
+        if (_items == null)
+        {
+            //Delegate to Empty Dictionary to do the argument checking.
+            EmptyDictionary.Collection.CopyTo(array, arrayIndex);
+        }
+        
+        _items?.CopyTo(array, arrayIndex);
+    }
+    
+    /* 迭代器 */
+    
+    IEnumerator<KeyValuePair<object, object?>> 
+        IEnumerable<KeyValuePair<object, object?>>.GetEnumerator() => 
+        	_items?.GetEnumerator() ?? EmptyEnumerator.Instance;
+
+    IEnumerator IEnumerable.GetEnumerator() => 
+        _items?.GetEnumerator() ?? EmptyEnumerator.Instance;
+    
+    private class EmptyEnumerator : IEnumerator<KeyValuePair<object, object?>>
+    {
+        // In own class so only initalized if GetEnumerator is called on an empty
+        // ItemsDictionary
+        public readonly static IEnumerator<KeyValuePair<object, object?>> Instance = 
+            new EmptyEnumerator();
+        
+        public KeyValuePair<object, object?> Current => default;        
+        object? IEnumerator.Current => null;
+        
+        public void Dispose()
+        { 
+        }
+        
+        public bool MoveNext() => false;
+        
+        public void Reset()
+        { 
+        }
+    }        
+}
+
+```
+
+
+
+##### 2.1.3 service provider feature
+
+###### 2.1.3.1 接口
+
+```c#
+public interface IServiceProvidersFeature
+{    
+    IServiceProvider RequestServices { get; set; }
+}
+
+```
+
+###### 2.1.3.2 实现
+
+```c#
+public class ServiceProvidersFeature : IServiceProvidersFeature
+{    
+    public IServiceProvider RequestServices { get; set; } = default!
+}
+
+```
+
+##### 2.1.4  http request lifetime feature
+
+###### 2.1.4.1 接口
+
+```c#
+public interface IHttpRequestLifetimeFeature
+{    
+    CancellationToken RequestAborted { get; set; }
+        
+    void Abort();
+}
+
+```
+
+###### 2.1.4.2 实现
+
+```c#
+public class HttpRequestLifetimeFeature : IHttpRequestLifetimeFeature
+{    
+    public CancellationToken RequestAborted { get; set; }
+    
+    public void Abort()
+    {
     }
 }
 
 ```
 
+
+
+##### 2.1.5 http request identifier feature
+
+###### 2.1.5.1 接口
+
+```c#
+public interface IHttpRequestIdentifierFeature
+{    
+    string TraceIdentifier { get; set; }
+}
+
+```
+
+###### 2.1.5.2 实现
+
+```c#
+public class HttpRequestIdentifierFeature : IHttpRequestIdentifierFeature
+{
+    // Base32 encoding - in ascii sort order for easy text based sorting
+    private static readonly char[] s_encode32Chars = 
+        "0123456789ABCDEFGHIJKLMNOPQRSTUV".ToCharArray();
+    
+    // Seed the _requestId for this application instance with the number of 
+    // 100-nanosecond intervals that have elapsed since 
+    // 12:00:00 midnight, January 1, 0001 for a roughly increasing _requestId over restarts
+    private static long _requestId = DateTime.UtcNow.Ticks;
+    
+    private string? _id = null;
+        
+    public string TraceIdentifier
+    {
+        get
+        {
+            // Don't incur the cost of generating the request ID until it's asked for
+            if (_id == null)
+            {
+                _id = GenerateRequestId(
+                    	  Interlocked.Increment(ref _requestId));
+            }
+            return _id;
+        }
+        set
+        {
+            _id = value;
+        }
+    }
+    
+    private static string GenerateRequestId(long id)
+    {
+        return string.Create(
+            			  13, 
+				          id, 
+			              (buffer, value) =>
+            			  {
+                              char[] encode32Chars = s_encode32Chars;
+                              
+                              buffer[12] = encode32Chars[value & 31];
+                              buffer[11] = encode32Chars[(value >> 5) & 31];
+                              buffer[10] = encode32Chars[(value >> 10) & 31];
+                              buffer[9] = encode32Chars[(value >> 15) & 31];
+                              buffer[8] = encode32Chars[(value >> 20) & 31];
+                              buffer[7] = encode32Chars[(value >> 25) & 31];
+                              buffer[6] = encode32Chars[(value >> 30) & 31];
+                              buffer[5] = encode32Chars[(value >> 35) & 31];
+                              buffer[4] = encode32Chars[(value >> 40) & 31];
+                              buffer[3] = encode32Chars[(value >> 45) & 31];
+                              buffer[2] = encode32Chars[(value >> 50) & 31];
+                              buffer[1] = encode32Chars[(value >> 55) & 31];
+                              buffer[0] = encode32Chars[(value >> 60) & 31];
+                          });
+    }
+}
+
+```
+
+
+
+##### 2.1.6 session feature
+
+###### 2.1.6.1 接口
+
+```c#
+public interface ISessionFeature
+{    
+    ISession Session { get; set; }
+}
+
+```
+
+###### 2.1.6.2 实现
+
+```c#
+public class DefaultSessionFeature : ISessionFeature
+{
+    /// <inheritdoc />
+    public ISession Session { get; set; } = default!;
+}
+
+```
+
+
+
+
+
 #### 2.2 headers
 
-##### 2.2.1 header dictionary
-
-###### 2.2.1.1 接口
+##### 2.2.1 header dictionary 接口
 
 ```c#
 public interface IHeaderDictionary : IDictionary<string, StringValues>
@@ -418,7 +493,7 @@ public interface IHeaderDictionary : IDictionary<string, StringValues>
 
 ```
 
-###### 2.2.1.2 实现
+##### 2.2.2 header dictionary
 
 ```c#
 public class HeaderDictionary : IHeaderDictionary
@@ -427,45 +502,6 @@ public class HeaderDictionary : IHeaderDictionary
     private static readonly string[] EmptyKeys = Array.Empty<string>();
     private static readonly StringValues[] EmptyValues = Array.Empty<StringValues>();
     
-    // empty enumerator
-    private static readonly Enumerator EmptyEnumerator = new Enumerator();    
-    private static readonly IEnumerator<KeyValuePair<string, StringValues>> 
-        EmptyIEnumeratorType = EmptyEnumerator;
-    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
-    
-    // container
-    private Dictionary<string, StringValues>? Store { get; set; }
-    
-	/* 属性 */            
-    
-    /* 构造函数 */
-    
-    public HeaderDictionary()
-    {
-    }
-                
-    public HeaderDictionary(Dictionary<string, StringValues>? store)
-    {
-        Store = store;        
-    }
-                    
-    public HeaderDictionary(int capacity)
-    {
-        EnsureStore(capacity);
-    }   
-    
-    /* 方法 crud */        
-    
-    /* 迭代器 */        
-}
-
-```
-
-###### 2.2.1.3 属性
-
-```c#
-public class HeaderDictionary : IHeaderDictionary
-{
     public int Count => Store?.Count ?? 0;
     public bool IsReadOnly { get; set; }
     
@@ -501,7 +537,7 @@ public class HeaderDictionary : IHeaderDictionary
             }
         }
     }
-                               
+    
     public ICollection<string> Keys
     {
         get
@@ -570,23 +606,34 @@ public class HeaderDictionary : IHeaderDictionary
             this[key] = value;
         }
     }
-}
-
-```
-
-###### 2.2.1.4 方法
-
-```c#
-public class HeaderDictionary : IHeaderDictionary
-{
+                                    
+    // container
+    private Dictionary<string, StringValues>? Store { get; set; }
+    	              
+    /* 构造函数 */
+    
+    public HeaderDictionary()
+    {
+    }
+                
+    public HeaderDictionary(Dictionary<string, StringValues>? store)
+    {
+        Store = store;        
+    }
+                    
+    public HeaderDictionary(int capacity)
+    {
+        EnsureStore(capacity);
+    }   
+    
     [MemberNotNull(nameof(Store))]
     private void EnsureStore(int capacity)
     {
         if (Store == null)
         {
             Store = new Dictionary<string, StringValues>(
-                capacity, 
-                StringComparer.OrdinalIgnoreCase);
+                			capacity, 
+			                StringComparer.OrdinalIgnoreCase);
         }
     }       
     
@@ -595,13 +642,20 @@ public class HeaderDictionary : IHeaderDictionary
         if (IsReadOnly)
         {
             throw new InvalidOperationException(
-                "The response headers cannot be modified 
-                "because the response has already started.");
+                		  "The response headers cannot be modified 
+		                  "because the response has already started.");
         }
-    }
-    
-    /* add */
-    
+    }    
+}
+
+```
+
+###### 2.2.2.1 方法
+
+```c#
+public class HeaderDictionary : IHeaderDictionary
+{        
+    /* add */    
     public void Add(KeyValuePair<string, StringValues> item)
     {
         if (item.Key == null)
@@ -631,8 +685,7 @@ public class HeaderDictionary : IHeaderDictionary
         Store?.Clear();
     }
        
-    /* contain */
-    
+    /* contain */    
     public bool Contains(KeyValuePair<string, StringValues> item)
     {
         if (Store == null ||
@@ -653,8 +706,7 @@ public class HeaderDictionary : IHeaderDictionary
         return Store.ContainsKey(key);
     }
         
-    /* remove */
-        
+    /* remove */        
     public bool Remove(KeyValuePair<string, StringValues> item)
     {
         ThrowIfReadOnly();
@@ -714,11 +766,17 @@ public class HeaderDictionary : IHeaderDictionary
 
 ```
 
-###### 2.2.1.5 迭代器
+###### 2.2.2.2 迭代器
 
 ```c#
 public class HeaderDictionary : IHeaderDictionary
 {
+    /* empty enumerator */
+    private static readonly Enumerator EmptyEnumerator = new Enumerator();    
+    private static readonly IEnumerator<KeyValuePair<string, StringValues>> 
+        EmptyIEnumeratorType = EmptyEnumerator;
+    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
+    
     public Enumerator GetEnumerator()
     {
         if (Store == null || Store.Count == 0)
@@ -809,10 +867,9 @@ public class HeaderDictionary : IHeaderDictionary
 
 ```
 
-##### 2.2.2 headers 扩展方法
+##### 2.2.3 header dictionary 扩展
 
-* known parser
-* known list parser
+###### 2.2.3.1 扩展属性 - known parser
 
 ```c#
 public static class HeaderDictionaryTypeExtensions
@@ -891,8 +948,16 @@ public static class HeaderDictionaryTypeExtensions
                         .TryParseNonNegativeInt64(value, out var result) ? result : null; 
                 }) 
         },
-    };
-    
+    };        
+}
+
+```
+
+###### 2.2.3.2 扩展属性 - known list parser
+
+```c#
+public static class HeaderDictionaryTypeExtensions
+{        
     private static IDictionary<Type, object> KnownListParsers = new Dictionary<Type, object>()
     {
         { 
@@ -950,12 +1015,37 @@ public static class HeaderDictionaryTypeExtensions
 
 ```
 
-###### 2.2.2.1 get via reflection
+###### 2.2.3.3 扩展方法 - get
 
 ```c#
 public static class HeaderDictionaryTypeExtensions
 {
-    // get T via reflection
+    /* get T */
+    internal static T? Get<T>(
+        this IHeaderDictionary headers, 
+        string name)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        var value = headers[name];        
+        if (StringValues.IsNullOrEmpty(value))
+        {
+            return default(T);
+        }
+        
+        if (KnownParsers.TryGetValue(typeof(T), out var temp))
+        {
+            var func = (Func<string, T>)temp;
+            return func(value);
+        }
+        
+        // get t via reflection
+        return GetViaReflection<T>(value.ToString());
+    }
+    // get via reflection
     private static T? GetViaReflection<T>(string value)
     {
         // TODO: Cache the reflected type for later? Only if success?
@@ -1003,7 +1093,32 @@ public static class HeaderDictionaryTypeExtensions
         return default(T);
     }
     
-    // get list<T> via reflection
+    /* get list T */
+    internal static IList<T> GetList<T>(
+        this IHeaderDictionary headers, 
+        string name)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        var values = headers[name];        
+        if (StringValues.IsNullOrEmpty(values))
+        {
+            return Array.Empty<T>();
+        }
+        
+        if (KnownListParsers.TryGetValue(typeof(T), out var temp))
+        {
+            var func = (Func<IList<string>, IList<T>>)temp;
+            return func(values);
+        }
+        
+        // get list via reflection
+        return GetListViaReflection<T>(values);
+    }
+    // get list via reflection
     private static IList<T> GetListViaReflection<T>(StringValues values)
     {
         // TODO: Cache the reflected type for later? Only if success?
@@ -1060,65 +1175,7 @@ public static class HeaderDictionaryTypeExtensions
 
 ```
 
-###### 2.2.2.2 get
-
-```c#
-public static class HeaderDictionaryTypeExtensions
-{
-    // get T
-    internal static T? Get<T>(
-        this IHeaderDictionary headers, 
-        string name)
-    {
-        if (headers == null)
-        {
-            throw new ArgumentNullException(nameof(headers));
-        }
-        
-        var value = headers[name];        
-        if (StringValues.IsNullOrEmpty(value))
-        {
-            return default(T);
-        }
-        
-        if (KnownParsers.TryGetValue(typeof(T), out var temp))
-        {
-            var func = (Func<string, T>)temp;
-            return func(value);
-        }
-        
-        return GetViaReflection<T>(value.ToString());
-    }
-    
-    // get list<T>
-    internal static IList<T> GetList<T>(
-        this IHeaderDictionary headers, 
-        string name)
-    {
-        if (headers == null)
-        {
-            throw new ArgumentNullException(nameof(headers));
-        }
-        
-        var values = headers[name];        
-        if (StringValues.IsNullOrEmpty(values))
-        {
-            return Array.Empty<T>();
-        }
-        
-        if (KnownListParsers.TryGetValue(typeof(T), out var temp))
-        {
-            var func = (Func<IList<string>, IList<T>>)temp;
-            return func(values);
-        }
-        
-        return GetListViaReflection<T>(values);
-    }
-}
-
-```
-
-###### 2.2.2.3 set and append
+###### 2.2.3.4 扩展方法 - set
 
 ```c#
 public static class HeaderDictionaryTypeExtensions
@@ -1177,6 +1234,16 @@ public static class HeaderDictionaryTypeExtensions
             headers[name] = new StringValues(newValues);
         }
     }
+}
+
+```
+
+###### 2.2.3.5 扩展方法 - append list T
+
+```c#
+public static class HeaderDictionaryTypeExtensions
+{
+     
     
     public static void AppendList<T>(
         this IHeaderDictionary Headers, 
@@ -1214,7 +1281,7 @@ public static class HeaderDictionaryTypeExtensions
 
 ```
 
-###### 2.2.2.4 get and set date
+###### 2.2.3.6 扩展方法 - get & set date
 
 ```c#
 public static class HeaderDictionaryTypeExtensions
@@ -1262,43 +1329,24 @@ public static class HeaderDictionaryTypeExtensions
 
 ```
 
-###### 2.2.2.5 more
-
-```c#
-
-    
-    
-   
-   
-```
+###### 2.2.3.7 扩展方法 - append & comma seperator
 
 ```c#
 public static class HeaderDictionaryExtensions
-{    
+{               
     public static void Append(
         this IHeaderDictionary headers, 
         string key, 
         StringValues value)
     {
-        ParsingHelpers
-            .AppendHeaderUnmodified(headers, key, value);
+        ParsingHelpers.AppendHeaderUnmodified(headers, key, value);
     }
-        
-    public static void AppendCommaSeparatedValues(
-        this IHeaderDictionary headers, 
-        string key, 
-        params string[] values)
-    {
-        ParsingHelpers
-            .AppendHeaderJoined(headers, key, values);
-    }
-        
+    
     public static string[] GetCommaSeparatedValues(
         this IHeaderDictionary headers, 
         string key)
     {
-        return ParsingHelpers
-            .GetHeaderSplit(headers, key).ToArray();
+        return ParsingHelpers.GetHeaderSplit(headers, key).ToArray();
     }
         
     public static void SetCommaSeparatedValues(
@@ -1306,21 +1354,183 @@ public static class HeaderDictionaryExtensions
         string key, 
         params string[] values)
     {
-        ParsingHelpers
-            .SetHeaderJoined(headers, key, values);
+        ParsingHelpers.SetHeaderJoined(headers, key, values);
+    }
+    
+    public static void AppendCommaSeparatedValues(
+        this IHeaderDictionary headers, 
+        string key, 
+        params string[] values)
+    {
+        ParsingHelpers.AppendHeaderJoined(headers, key, values);
+    }
+}
+
+internal static class ParsingHelpers
+{
+    public static StringValues GetHeader(IHeaderDictionary headers, string key)
+    {
+        StringValues value;
+        return headers.TryGetValue(key, out value) ? value : StringValues.Empty;
+    }
+    
+    public static StringValues GetHeaderSplit(IHeaderDictionary headers, string key)
+    {
+        var values = GetHeaderUnmodified(headers, key);
+        
+        StringValues result = default;
+        
+        foreach (var segment in new HeaderSegmentCollection(values))
+        {
+            if (!StringSegment.IsNullOrEmpty(segment.Data))
+            {
+                var value = DeQuote(segment.Data.Value);
+                if (!string.IsNullOrEmpty(value))
+                {
+                    result = StringValues.Concat(in result, value);
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    public static StringValues GetHeaderUnmodified(IHeaderDictionary headers, string key)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        StringValues values;
+        return headers.TryGetValue(key, out values) ? values : StringValues.Empty;
+    }
+    
+    public static void SetHeaderJoined(IHeaderDictionary headers, string key, StringValues value)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        if (StringValues.IsNullOrEmpty(value))
+        {
+            headers.Remove(key);
+        }
+        else
+        {
+            headers[key] = string.Join(",", value.Select((s) => QuoteIfNeeded(s)));
+        }
+    }
+    
+    // Quote items that contain commas and are not already quoted.
+    private static string QuoteIfNeeded(string value)
+    {
+        if (!string.IsNullOrEmpty(value) &&
+            value.Contains(',') &&
+            (value[0] != '"' || value[value.Length - 1] != '"'))
+        {
+            return $"\"{value}\"";
+        }
+        return value;
+    }
+    
+    private static string DeQuote(string value)
+    {
+        if (!string.IsNullOrEmpty(value) &&
+            (value.Length > 1 && value[0] == '"' && value[value.Length - 1] == '"'))
+        {
+            value = value.Substring(1, value.Length - 2);
+        }
+        
+        return value;
+    }
+    
+    public static void SetHeaderUnmodified(IHeaderDictionary headers, string key, StringValues? values)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        if (string.IsNullOrEmpty(key))
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        if (!values.HasValue || StringValues.IsNullOrEmpty(values.GetValueOrDefault()))
+        {
+            headers.Remove(key);
+        }
+        else
+        {
+            headers[key] = values.GetValueOrDefault();
+        }
+    }
+    
+    public static void AppendHeaderJoined(IHeaderDictionary headers, string key, params string[] values)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        if (key == null)
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        
+        if (values == null || values.Length == 0)
+        {
+            return;
+        }
+        
+        string existing = GetHeader(headers, key);
+        if (existing == null)
+        {
+            SetHeaderJoined(headers, key, values);
+        }
+        else
+        {
+            
+            headers[key] = existing + "," + string.Join(",", values.Select(value => QuoteIfNeeded(value)));
+        }
+    }
+    
+    public static void AppendHeaderUnmodified(IHeaderDictionary headers, string key, StringValues values)
+    {
+        if (headers == null)
+        {
+            throw new ArgumentNullException(nameof(headers));
+        }
+        
+        if (key == null)
+        {
+            throw new ArgumentNullException(nameof(key));
+        }
+        
+        if (values.Count == 0)
+        {
+            return;
+        }
+        
+        var existing = GetHeaderUnmodified(headers, key);
+        SetHeaderUnmodified(headers, key, StringValues.Concat(existing, values));
     }
 }
 
 ```
 
-##### 2.2.3 request headers
+##### 2.2.4 request headers
 
 ```c#
 public class RequestHeaders
-{
-    // 构造，注入 headers dictionary
-    
+{    
     public IHeaderDictionary Headers { get; }
+    
     public RequestHeaders(IHeaderDictionary headers)
     {
         if (headers == null)
@@ -1349,8 +1559,7 @@ public class RequestHeaders
     {
         get
         {
-            return Headers
-                .GetList<StringWithQualityHeaderValue>(HeaderNames.AcceptCharset);
+            return Headers.GetList<StringWithQualityHeaderValue>(HeaderNames.AcceptCharset);
         }
         set
         {
@@ -1362,8 +1571,7 @@ public class RequestHeaders
     {
         get
         {
-            return Headers
-                .GetList<StringWithQualityHeaderValue>(HeaderNames.AcceptEncoding);
+            return Headers.GetList<StringWithQualityHeaderValue>(HeaderNames.AcceptEncoding);
         }
         set
         {
@@ -1375,8 +1583,7 @@ public class RequestHeaders
     {
         get
         {
-            return Headers
-                .GetList<StringWithQualityHeaderValue>(HeaderNames.AcceptLanguage);
+            return Headers.GetList<StringWithQualityHeaderValue>(HeaderNames.AcceptLanguage);
         }
         set
         {
@@ -1388,8 +1595,7 @@ public class RequestHeaders
     {
         get
         {
-            return Headers
-                .Get<CacheControlHeaderValue>(HeaderNames.CacheControl);
+            return Headers.Get<CacheControlHeaderValue>(HeaderNames.CacheControl);
         }
         set
         {
@@ -1401,8 +1607,7 @@ public class RequestHeaders
     {
         get
         {
-            return Headers
-                .Get<ContentDispositionHeaderValue>(HeaderNames.ContentDisposition);
+            return Headers.Get<ContentDispositionHeaderValue>(HeaderNames.ContentDisposition);
         }
         set
         {
@@ -1426,8 +1631,7 @@ public class RequestHeaders
     {
         get
         {
-            return Headers
-                .Get<ContentRangeHeaderValue>(HeaderNames.ContentRange);
+            return Headers.Get<ContentRangeHeaderValue>(HeaderNames.ContentRange);
         }
         set
         {
@@ -1584,9 +1788,9 @@ public class RequestHeaders
         get
         {
             if (Uri.TryCreate(
-                Headers[HeaderNames.Referer], 
-                UriKind.RelativeOrAbsolute, 
-                out var uri))
+                		Headers[HeaderNames.Referer], 
+		                UriKind.RelativeOrAbsolute, 
+        		        out var uri))
             {
                 return uri;
             }
@@ -1595,21 +1799,20 @@ public class RequestHeaders
         set
         {
             Headers.Set(
-                HeaderNames.Referer, 
-                value == null ? null : UriHelper.Encode(value));
+                		HeaderNames.Referer, 
+		                value == null ? null : UriHelper.Encode(value));
         }
     }           
 }
 
 ```
 
-###### 2.2.3.1 方法
+###### 2.2.4.1 crud 方法
 
 ```c#
 public class RequestHeaders
 {
-    // get
-    
+    /* get */    
     public T? Get<T>(string name)
     {
         return Headers.Get<T>(name);
@@ -1620,8 +1823,7 @@ public class RequestHeaders
         return Headers.GetList<T>(name);
     }
     
-    // set 
-    
+    /* set */    
     public void Set(string name, object? value)
     {
         if (name == null)
@@ -1642,8 +1844,7 @@ public class RequestHeaders
         Headers.SetList<T>(name, values);
     }
         
-    // append
-    
+    /* append */    
     public void Append(string name, object value)
     {
         if (name == null)
@@ -1667,7 +1868,7 @@ public class RequestHeaders
 
 ```
 
-###### 2.2.3.2 扩展方法
+###### 2.2.4.2 扩展方法
 
 ```c#
 public static class HeaderDictionaryTypeExtensions
@@ -1680,13 +1881,13 @@ public static class HeaderDictionaryTypeExtensions
 
 ```
 
-##### 2.2.4 response headers
+##### 2.2.5 response headers
 
 ```c#
 public class ResponseHeaders
-{
-    // 构造函数，注入 headers dictionary
+{    
     public IHeaderDictionary Headers { get; }
+    
     public ResponseHeaders(IHeaderDictionary headers)
     {
         if (headers == null)
@@ -1812,9 +2013,9 @@ public class ResponseHeaders
         get
         {
             if (Uri.TryCreate(
-                Headers[HeaderNames.Location], 
-                UriKind.RelativeOrAbsolute, 
-                out var uri))
+                		Headers[HeaderNames.Location], 
+                		UriKind.RelativeOrAbsolute, 
+                		out var uri))
             {
                 return uri;
             }
@@ -1823,8 +2024,8 @@ public class ResponseHeaders
         set
         {
             Headers.Set(
-                HeaderNames.Location, 
-                value == null ? null : UriHelper.Encode(value));
+                		HeaderNames.Location, 
+                		value == null ? null : UriHelper.Encode(value));
         }
     }
         
@@ -1843,12 +2044,12 @@ public class ResponseHeaders
 
 ```
 
-###### 2.2.4.1 方法
+###### 2.2.5.1 crud 方法
 
 ```c#
 public class ResponseHeaders
 {
-    // get   
+    /* get */
     public T? Get<T>(string name)
     {
         return Headers.Get<T>(name);
@@ -1859,7 +2060,7 @@ public class ResponseHeaders
         return Headers.GetList<T>(name);
     }
       
-    // set
+    /* set */
     public void Set(string name, object? value)
     {
         if (name == null)
@@ -1880,7 +2081,7 @@ public class ResponseHeaders
         Headers.SetList<T>(name, values);
     }
       
-    // append
+    /* append */
     public void Append(string name, object value)
     {
         if (name == null)
@@ -1904,9 +2105,7 @@ public class ResponseHeaders
 
 ```
 
-
-
-###### 2.2.4.2 扩展方法
+###### 2.2.5.2 扩展方法
 
 ```c#
 public static class HeaderDictionaryTypeExtensions
@@ -1919,9 +2118,9 @@ public static class HeaderDictionaryTypeExtensions
 
 ```
 
-#### 2.2 http request
+#### 2.3 http request
 
-##### 2.2.1 抽象基类
+##### 2.3.1 抽象基类
 
 ```c#
 public abstract class HttpRequest
@@ -1960,17 +2159,14 @@ public abstract class HttpRequest
 
 ```
 
-##### 2.2.2 默认实现
+##### 2.3.2 default http request
 
 ```c#
 internal sealed class DefaultHttpRequest : HttpRequest
 {
     private const string Http = "http";
     private const string Https = "https";
-        
-    private readonly DefaultHttpContext _context;
-    
-    private FeatureReferences<FeatureInterfaces> _features;
+                
     struct FeatureInterfaces
     {
         public IHttpRequestFeature? Request;
@@ -1980,7 +2176,8 @@ internal sealed class DefaultHttpRequest : HttpRequest
         public IRouteValuesFeature? RouteValues;
         public IRequestBodyPipeFeature? BodyPipe;
     }
-    
+    private FeatureReferences<FeatureInterfaces> _features;
+        
     /* 构造函数 */
     
     public DefaultHttpRequest(DefaultHttpContext context)
@@ -2015,185 +2212,208 @@ internal sealed class DefaultHttpRequest : HttpRequest
 
 ```
 
-###### 2.2.2.1 公共属性
+###### 2.3.2.1 props
 
 ```c#
 internal sealed class DefaultHttpRequest : HttpRequest
 {
+    /* http context */
+    private readonly DefaultHttpContext _context;
     public override HttpContext HttpContext => _context;        
     
+    /* http request feature with default */
+    private IHttpRequestFeature HttpRequestFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Request, 
+		  	       	  _nullRequestFeature)!;
+    
+    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
+        _nullRequestFeature = f => null;
+    
+    // 从 http request feature 解析 method    
     public override string Method
     {
         get { return HttpRequestFeature.Method; }
         set { HttpRequestFeature.Method = value; }
     }
+    
+    // 从 http request feature 解析 scheme
     public override string Scheme
     {
         get { return HttpRequestFeature.Scheme; }
         set { HttpRequestFeature.Scheme = value; }
     }    
+    
+    // ?
     public override bool IsHttps
     {
         get { return string.Equals(
-            	Https, 
-            	Scheme, 
-            	StringComparison.OrdinalIgnoreCase); }
+            					Https, 
+            					Scheme, 
+            					StringComparison.OrdinalIgnoreCase); }
         set { Scheme = value ? Https : Http; }
     }
     
+    // 从 header 属性解析 host
     public override HostString Host
     {
         get { return HostString.FromUriComponent(Headers[HeaderNames.Host]); }
         set { Headers[HeaderNames.Host] = value.ToUriComponent(); }
     }
+    
+    // 从 http request feature 解析 path-base
     public override PathString PathBase
     {
         get { return new PathString(HttpRequestFeature.PathBase); }
         set { HttpRequestFeature.PathBase = value.Value ?? string.Empty; }
-    }    
+    }
+    
+    //从 http request feature 解析 path
     public override PathString Path
     {
         get { return new PathString(HttpRequestFeature.Path); }
         set { HttpRequestFeature.Path = value.Value ?? string.Empty; }
     }
     
+    // 从 http request feature 解析 query string
     public override QueryString QueryString
     {
         get { return new QueryString(HttpRequestFeature.QueryString); }
         set { HttpRequestFeature.QueryString = value.Value ?? string.Empty; }
     }
+    
+    /* query feature with default */
+    private IQueryFeature QueryFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Query, 
+        			  _newQueryFeature)!;
+    
+    private readonly static Func<IFeatureCollection, IQueryFeature?> 
+        _newQueryFeature = f => new QueryFeature(f);    
+    
+    // 从 query feature 解析 query collection
     public override IQueryCollection Query        
     {
         get { return QueryFeature.Query; }
         set { QueryFeature.Query = value; }
     }
     
+    // 从 http request feature 解析 protocol
     public override string Protocol
     {
         get { return HttpRequestFeature.Protocol; }
         set { HttpRequestFeature.Protocol = value; }
     }
     
+    // 从 http request feature 解析 (request) headers
     public override IHeaderDictionary Headers
     {
         get { return HttpRequestFeature.Headers; }
     }
     
+    /* request cookie feature with default */    
+    private IRequestCookiesFeature RequestCookiesFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Cookies, 
+        			  _newRequestCookiesFeature)!;
+    
+    private readonly static Func<IFeatureCollection, IRequestCookiesFeature> 
+        _newRequestCookiesFeature = f => new RequestCookiesFeature(f);
+    
+    // 从 request cookies feature 解析 cookies
     public override IRequestCookieCollection Cookies
     {
         get { return RequestCookiesFeature.Cookies; }
         set { RequestCookiesFeature.Cookies = value; }
     }
-    
+        
+    // 从 headers 属性解析 content length
     public override long? ContentLength
     {
         get { return Headers.ContentLength; }
         set { Headers.ContentLength = value; }
     }
+    
+    // 从 headers 属性解析 content type
     public override string ContentType
     {
         get { return Headers[HeaderNames.ContentType]; }
         set { Headers[HeaderNames.ContentType] = value; }
     }
+    
+    // 从 http request feature 解析 body
     public override Stream Body
     {
         get { return HttpRequestFeature.Body; }
         set { HttpRequestFeature.Body = value; }
     }
+    
+    /* request body pipe feauture with default */    
+    private IRequestBodyPipeFeature RequestBodyPipeFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.BodyPipe, 
+        			  this.HttpContext, 
+        			  _newRequestBodyPipeFeature)!;
+    
+    private readonly static Func<HttpContext, IRequestBodyPipeFeature> 
+        _newRequestBodyPipeFeature = context => new RequestBodyPipeFeature(context);
+    
+    // 从 request body pipe feature 解析 body ready
     public override PipeReader BodyReader
     {
         get { return RequestBodyPipeFeature.Reader; }
     }
     
+    /* form feature with default */    
+    private IFormFeature FormFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Form, 
+        			  this, 
+        			  _newFormFeature)!;
+    
+    private readonly static Func<DefaultHttpRequest, IFormFeature> 
+        _newFormFeature = r => 
+        	new FormFeature(
+        			r, 
+        			r._context.FormOptions ?? FormOptions.Default);
+    
+    // 从 form feature 判断 has form 
     public override bool HasFormContentType
     {
         get { return FormFeature.HasFormContentType; }
     }    
+    
+    // 从 form feature 解析 form
     public override IFormCollection Form
     {
         get { return FormFeature.ReadForm(); }
         set { FormFeature.Form = value; }
     }
+        
+    /* route value feature with default */
+    private IRouteValuesFeature RouteValuesFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.RouteValues, 
+        			  _newRouteValuesFeature)!;                
     
+    private readonly static Func<IFeatureCollection, IRouteValuesFeature> 
+        _newRouteValuesFeature = f => new RouteValuesFeature();
+    
+    // 从 route value feature 解析 route value dictionary
     public override RouteValueDictionary RouteValues
     {
         get { return RouteValuesFeature.RouteValues; }
         set { RouteValuesFeature.RouteValues = value; }
     }                                                                    
 }
-```
-
-###### 2.2.2.2 features
-
-```c#
-internal sealed class DefaultHttpRequest : HttpRequest
-{
-    // private property
-    
-    private IHttpRequestFeature HttpRequestFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Request, 
-        	_nullRequestFeature)!;
-    
-    private IQueryFeature QueryFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Query, 
-        	_newQueryFeature)!;
-    
-    private IFormFeature FormFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Form, 
-        	this, 
-        	_newFormFeature)!;
-    
-    private IRequestCookiesFeature RequestCookiesFeature =>
-        _features.Fetch(
-        	ref _features.Cache.Cookies, 
-        	_newRequestCookiesFeature)!;
-    
-    private IRouteValuesFeature RouteValuesFeature =>
-        _features.Fetch(
-        	ref _features.Cache.RouteValues, 
-        	_newRouteValuesFeature)!;
-    
-    private IRequestBodyPipeFeature RequestBodyPipeFeature =>
-        _features.Fetch(
-        	ref _features.Cache.BodyPipe, 
-        	this.HttpContext, 
-        	_newRequestBodyPipeFeature)!;
-    
-    // default 
-    
-    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
-        _nullRequestFeature = f => null;
-    
-    private readonly static Func<IFeatureCollection, IQueryFeature?> 
-        _newQueryFeature = f => new QueryFeature(f);
-    
-    private readonly static Func<DefaultHttpRequest, IFormFeature> 
-        _newFormFeature = r => 
-        	new FormFeature(
-        		r, 
-        		r._context.FormOptions ?? FormOptions.Default);
-    
-    private readonly static Func<IFeatureCollection, IRequestCookiesFeature> 
-        _newRequestCookiesFeature = f => new RequestCookiesFeature(f);
-    
-    private readonly static Func<IFeatureCollection, IRouteValuesFeature> 
-        _newRouteValuesFeature = f => new RouteValuesFeature();
-    
-    private readonly static Func<HttpContext, IRequestBodyPipeFeature> 
-        _newRequestBodyPipeFeature = context => new RequestBodyPipeFeature(context);
-}
 
 ```
 
-###### 2.2.2.3 json 扩展
+###### 2.3.2.2 扩展方法 - read from json
 
 ```c#
 public static class HttpRequestJsonExtensions
-{
-    
+{    
     [SuppressMessage(
         "ApiDesign", 
         "RS0026:Do not add multiple public overloads with optional parameters", 
@@ -2203,8 +2423,8 @@ public static class HttpRequestJsonExtensions
         CancellationToken cancellationToken = default)
     {
         return request.ReadFromJsonAsync<TValue>(
-            options: null, 
-            cancellationToken);
+            	   		   options: null, 
+			               cancellationToken);
     }
         
     [SuppressMessage(
@@ -2236,9 +2456,9 @@ public static class HttpRequestJsonExtensions
         try
         {
             return await JsonSerializer.DeserializeAsync<TValue>(
-                inputStream, 
-                options, 
-                cancellationToken);
+                			 inputStream, 
+			                 options, 
+             			     cancellationToken);
         }
         finally
         {
@@ -2259,8 +2479,8 @@ public static class HttpRequestJsonExtensions
         CancellationToken cancellationToken = default)
     {
         return request.ReadFromJsonAsync(
-            type, 
-            options: null, cancellationToken);
+            	   type, 
+		           options: null, cancellationToken);
     }
             
     [SuppressMessage(
@@ -2290,17 +2510,17 @@ public static class HttpRequestJsonExtensions
         
         var encoding = GetEncodingFromCharset(charset);
         var (inputStream, usesTranscodingStream) = 
-            GetInputStream(
-            request.HttpContext, 
-            encoding);
+            	GetInputStream(
+	            request.HttpContext, 
+    	        encoding);
         
         try
         {
             return await JsonSerializer.DeserializeAsync(
-                inputStream, 
-                type, 
-                options, 
-                cancellationToken);
+                			 inputStream, 
+			                 type, 
+             			     options, 
+			                 cancellationToken);
         }
         finally
         {
@@ -2327,26 +2547,28 @@ public static class HttpRequestJsonExtensions
         }
         
         if (!MediaTypeHeaderValue.TryParse(
-            	request.ContentType, 
-            	out var mt))
+            						  request.ContentType, 
+					              	  out var mt))
         {
             charset = StringSegment.Empty;
             return false;
         }
         
         // Matches application/json
-        if (mt.MediaType.Equals(
-            	JsonConstants.JsonContentType, 
-            	StringComparison.OrdinalIgnoreCase))
+        if (mt.MediaType
+              .Equals(
+            	   JsonConstants.JsonContentType, 
+            	   StringComparison.OrdinalIgnoreCase))
         {
             charset = mt.Charset;
             return true;
         }
         
         // Matches +json, e.g. application/ld+json
-        if (mt.Suffix.Equals(
-            	"json", 
-            	StringComparison.OrdinalIgnoreCase))
+        if (mt.Suffix
+              .Equals(
+            	   "json", 
+            	   StringComparison.OrdinalIgnoreCase))
         {
             charset = mt.Charset;
             return true;
@@ -2359,20 +2581,19 @@ public static class HttpRequestJsonExtensions
     private static JsonSerializerOptions ResolveSerializerOptions(HttpContext httpContext)
     {
         // Attempt to resolve options from DI then fallback to default options
-        return httpContext
-            .RequestServices
-            ?.GetService<IOptions<JsonOptions>>()
-            ?.Value
-            ?.SerializerOptions 
-            	?? JsonOptions.DefaultSerializerOptions;
+        return httpContext.RequestServices
+            			  ?.GetService<IOptions<JsonOptions>>()
+			              ?.Value
+            			  ?.SerializerOptions 
+			           	  ?? JsonOptions.DefaultSerializerOptions;
     }
     
     private static InvalidOperationException CreateContentTypeError(HttpRequest request)
     {
         return new InvalidOperationException(
-            $"Unable to read the request as JSON because 
-            "the request content type '{request.ContentType}' 
-            "is not a known JSON content type.");
+            		   $"Unable to read the request as JSON because 
+			           "the request content type '{request.ContentType}' 
+            		   "is not a known JSON content type.");
     }
     
     private static (Stream inputStream, bool usesTranscodingStream) GetInputStream(
@@ -2386,10 +2607,10 @@ public static class HttpRequestJsonExtensions
         }
         
         var inputStream = Encoding.CreateTranscodingStream(
-            httpContext.Request.Body, 
-            encoding, 
-            Encoding.UTF8, 
-            leaveOpen: true);
+            						   httpContext.Request.Body, 
+							           encoding, 
+							           Encoding.UTF8, 
+							           leaveOpen: true);
         
         return (inputStream, true);
     }
@@ -2407,92 +2628,23 @@ public static class HttpRequestJsonExtensions
         {
             // charset.Value might be an invalid encoding name as in charset=invalid.
             return charset.HasValue 
-                ? Encoding.GetEncoding(charset.Value) 
-                : null;
+                			   ? Encoding.GetEncoding(charset.Value) 
+			                   : null;
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"Unable to read the request as JSON because 
-                "the request content type charset '{charset}' 
-                "is not a known encoding.", 
-                ex);
+                		  $"Unable to read the request as JSON because 
+			              "the request content type charset '{charset}' 
+            			  "is not a known encoding.", 
+		              ex);
         }
     }
 }
 
 ```
 
-###### 2.2.2.4  multipart 扩展
-
-```c#
-public static class HttpRequestMultipartExtensions
-{    
-    public static string GetMultipartBoundary(this HttpRequest request)
-    {
-        if (request == null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-        
-        if (!MediaTypeHeaderValue.TryParse(
-            	request.ContentType, 
-            	out var mediaType))
-        {
-            return string.Empty;
-        }
-        
-        return HeaderUtilities
-            .RemoveQuotes(mediaType.Boundary)
-            .ToString();
-    }
-}
-
-```
-
-###### 2.2.2.5 rewind 扩展
-
-```c#
-public static class HttpRequestRewindExtensions
-{    
-    public static void EnableBuffering(this HttpRequest request)
-    {
-        BufferingHelper.EnableRewind(request);
-    }
-        
-    public static void EnableBuffering(
-        this HttpRequest request, 
-        int bufferThreshold)
-    {
-        BufferingHelper.EnableRewind(
-            request, 
-            bufferThreshold);
-    }
-        
-    public static void EnableBuffering(
-        this HttpRequest request, 
-        long bufferLimit)
-    {
-        BufferingHelper.EnableRewind(
-            request, 
-            bufferLimit: bufferLimit);
-    }
-        
-    public static void EnableBuffering(
-        this HttpRequest request, 
-        int bufferThreshold, 
-        long bufferLimit)
-    {
-        BufferingHelper.EnableRewind(
-            request, 
-            bufferThreshold, 
-            bufferLimit);
-    }
-}
-
-```
-
-###### 2.2.2.6 form reader 扩展
+###### 2.3.2.3 扩展方法 - read form
 
 ```c#
 public static class RequestFormReaderExtensions
@@ -2529,45 +2681,109 @@ public static class RequestFormReaderExtensions
 
 ```
 
-###### 2.2.2.7 trailer 扩展
+###### 2.3.2.4  扩展方法 - request multipart
+
+```c#
+public static class HttpRequestMultipartExtensions
+{    
+    public static string GetMultipartBoundary(this HttpRequest request)
+    {
+        if (request == null)
+        {
+            throw new ArgumentNullException(nameof(request));
+        }
+        
+        if (!MediaTypeHeaderValue.TryParse(
+            	request.ContentType, 
+            	out var mediaType))
+        {
+            return string.Empty;
+        }
+        
+        return HeaderUtilities.RemoveQuotes(mediaType.Boundary)
+				              .ToString();
+    }
+}
+
+```
+
+###### 2.3.2.5 扩展方法 - request rewind
+
+```c#
+public static class HttpRequestRewindExtensions
+{    
+    public static void EnableBuffering(this HttpRequest request)
+    {
+        BufferingHelper.EnableRewind(request);
+    }
+        
+    public static void EnableBuffering(
+        this HttpRequest request, 
+        int bufferThreshold)
+    {
+        BufferingHelper.EnableRewind(
+            				request, 
+				            bufferThreshold);
+    }
+        
+    public static void EnableBuffering(
+        this HttpRequest request, 
+        long bufferLimit)
+    {
+        BufferingHelper.EnableRewind(
+			            request, 
+            			bufferLimit: bufferLimit);
+    }
+        
+    public static void EnableBuffering(
+        this HttpRequest request, 
+        int bufferThreshold, 
+        long bufferLimit)
+    {
+        BufferingHelper.EnableRewind(
+            			request, 
+            			bufferThreshold, 
+            			bufferLimit);
+    }
+}
+
+```
+
+###### 2.3.2.6 扩展方法 - trailer
 
 ```c#
 public static class RequestTrailerExtensions
 {    
     public static StringValues GetDeclaredTrailers(this HttpRequest request)
     {
-        return request
-            .Headers
-            .GetCommaSeparatedValues(HeaderNames.Trailer);
+        return request.Headers
+		              .GetCommaSeparatedValues(HeaderNames.Trailer);
     }
         
     public static bool SupportsTrailers(this HttpRequest request)
     {
-        return request
-            .HttpContext
-            .Features
-            .Get<IHttpRequestTrailersFeature>() != null;
+        return request.HttpContext
+			          .Features
+            		  .Get<IHttpRequestTrailersFeature>() != null;
     }
         
     public static bool CheckTrailersAvailable(this HttpRequest request)
     {
-        return request
-            .HttpContext
-            .Features
-            .Get<IHttpRequestTrailersFeature>()?.Available == true;
+        return request.HttpContext
+			          .Features
+            		  .Get<IHttpRequestTrailersFeature>()?.Available == true;
     }
         
     public static StringValues GetTrailer(this HttpRequest request, string trailerName)
     {
-        var feature = request
-            .HttpContext
-            .Features
-            .Get<IHttpRequestTrailersFeature>();
+        var feature = request.HttpContext
+				             .Features
+            				 .Get<IHttpRequestTrailersFeature>();
         
         if (feature == null)
         {
             throw new NotSupportedException(
-                "This request does not support trailers.");
+                		  "This request does not support trailers.");
         }
         
         return feature.Trailers[trailerName];
@@ -2576,18 +2792,174 @@ public static class RequestTrailerExtensions
 
 ```
 
+##### 2.3.3 http request feature
 
-
-##### 2.2.3 query collection
-
-###### 2.2.3.1 接口
+###### 2.3.3.1 接口
 
 ```c#
-public interface IQueryCollection : 	
-	IEnumerable<KeyValuePair<string, StringValues>>
+public interface IHttpRequestFeature
+{    
+    string Protocol { get; set; }        
+    string Scheme { get; set; }        
+    string Method { get; set; }        
+    string PathBase { get; set; }        
+    string Path { get; set; }        
+    string QueryString { get; set; }        
+    string RawTarget { get; set; }        
+    IHeaderDictionary Headers { get; set; }    
+    Stream Body { get; set; }
+}
+
+```
+
+###### 2.3.3.2 实现
+
+```c#
+public class HttpRequestFeature : IHttpRequestFeature
+{    
+    public string Protocol { get; set; }        
+    public string Scheme { get; set; }        
+    public string Method { get; set; }        
+    public string PathBase { get; set; }        
+    public string Path { get; set; }        
+    public string QueryString { get; set; }        
+    public string RawTarget { get; set; }        
+    public IHeaderDictionary Headers { get; set; }        
+    public Stream Body { get; set; }
+    
+    public HttpRequestFeature()                
+    {
+        Headers = new HeaderDictionary();
+        Body = Stream.Null;
+        Protocol = string.Empty;
+        Scheme = string.Empty;
+        Method = string.Empty;
+        PathBase = string.Empty;
+        Path = string.Empty;
+        QueryString = string.Empty;
+        RawTarget = string.Empty;
+    }            
+}
+
+```
+
+##### 2.3.4 query feature
+
+###### 2.3.4.1 query feature 接口
+
+```c#
+public interface IQueryFeature
+{    
+    IQueryCollection Query { get; set; }
+}
+
+```
+
+###### 2.3.4.2 query feature 实现
+
+```c#
+public class QueryFeature : IQueryFeature
+{            
+    // http request feature with default (null)
+    private FeatureReferences<IHttpRequestFeature> _features;
+    private IHttpRequestFeature HttpRequestFeature =>
+        _features.Fetch(
+        			  ref _features.Cache, 
+        			  _nullRequestFeature)!;    
+    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
+        _nullRequestFeature = f => null;
+    
+    private string? _original;
+    private IQueryCollection? _parsedValues;
+    
+    public IQueryCollection Query
+    {
+        get
+        {
+            if (_features.Collection == null)
+            {
+                if (_parsedValues == null)
+                {
+                    _parsedValues = QueryCollection.Empty;
+                }
+                return _parsedValues;
+            }
+            
+            var current = HttpRequestFeature.QueryString;
+            
+            if (_parsedValues == null || 
+                !string.Equals(
+                    		_original, 
+		                    current, 
+        		            StringComparison.Ordinal))
+            {
+                _original = current;
+                
+                var result = QueryHelpers.ParseNullableQuery(current);
+                
+                if (result == null)
+                {
+                    _parsedValues = QueryCollection.Empty;
+                }
+                else
+                {
+                    _parsedValues = new QueryCollection(result);
+                }
+            }
+            return _parsedValues;
+        }
+        set
+        {
+            _parsedValues = value;
+            if (_features.Collection != null)
+            {
+                if (value == null)
+                {
+                    _original = string.Empty;
+                    HttpRequestFeature.QueryString = string.Empty;
+                }
+                else
+                {
+                    _original = QueryString.Create(_parsedValues).ToString();
+                    HttpRequestFeature.QueryString = _original;
+                }
+            }
+        }
+    }
+    
+    /* 构造函数*/
+    
+    public QueryFeature(IQueryCollection query)
+    {
+        if (query == null)
+        {
+            throw new ArgumentNullException(nameof(query));
+        }
+        
+        _parsedValues = query;
+    }
+        
+    public QueryFeature(IFeatureCollection features)
+    {
+        if (features == null)
+        {
+            throw new ArgumentNullException(nameof(features));
+        }
+        
+        _features.Initalize(features);
+    }       	           
+}
+
+```
+
+###### 2.3.4.3 query collection 接口
+
+```c#
+public interface IQueryCollection : IEnumerable<KeyValuePair<string, StringValues>>
 {    
     int Count { get; }        
-    ICollection<string> Keys { get; }        
+    ICollection<string> Keys { get; }     
+    
     bool ContainsKey(string key);        
     bool TryGetValue(string key, out StringValues value);        
     StringValues this[string key] { get; }
@@ -2595,24 +2967,17 @@ public interface IQueryCollection :
 
 ```
 
-###### 2.2.3.2 实现
+###### 2.3.4.4 query collection 实现
 
 ```c#
 public class QueryCollection : IQueryCollection
-{    
-    // empty collection
-    public static readonly QueryCollection Empty = new QueryCollection();    
+{        
+    // 静态 empty 实例
+    public static readonly QueryCollection Empty = new QueryCollection();     
     
-    // empty keys & values
     private static readonly string[] EmptyKeys = Array.Empty<string>();
     private static readonly StringValues[] EmptyValues = Array.Empty<StringValues>();
-    
-    // empty enumerator
-    private static readonly Enumerator EmptyEnumerator = new Enumerator();    
-    private static readonly IEnumerator<KeyValuePair<string, StringValues>> 
-        EmptyIEnumeratorType = EmptyEnumerator;
-    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
-    
+            
     // container
     private Dictionary<string, StringValues>? Store { get; set; }
     
@@ -2680,9 +3045,7 @@ public class QueryCollection : IQueryCollection
         Store = new Dictionary<string, StringValues>(
             capacity, 
             StringComparer.OrdinalIgnoreCase);
-    }
-    
-    /* 迭代器 */        
+    }            
     
     /* 方法 */
     
@@ -2703,17 +3066,17 @@ public class QueryCollection : IQueryCollection
             return false;
         }
         return Store.TryGetValue(key, out value);
-    }                       
-}
-
-```
-
-###### 2.2.3.3 迭代器
-
-```c#
-public class QueryCollection : IQueryCollection
-{  
-    public Enumerator GetEnumerator()
+    }
+    
+    /* 迭代器 */   
+    
+    // empty enumerator
+    private static readonly Enumerator EmptyEnumerator = new Enumerator();    
+    private static readonly IEnumerator<KeyValuePair<string, StringValues>> 
+        EmptyIEnumeratorType = EmptyEnumerator;
+    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
+    
+     public Enumerator GetEnumerator()
     {
         if (Store == null || Store.Count == 0)
         {
@@ -2799,290 +3162,455 @@ public class QueryCollection : IQueryCollection
             }
         }
     }
+    
 }
 
 ```
 
+##### 2.3.5 form feature
 
-
-
-
-##### 2.2.4 request cookie collection
-
-###### 2.2.4.1 接口 
+###### 2.3.5.1 form feature 接口
 
 ```c#
-public interface IRequestCookieCollection : IEnumerable<KeyValuePair<string, string>>
+public interface IFormFeature
 {    
-    int Count { get; }        
-    ICollection<string> Keys { get; }
-    string? this[string key] { get; }
-    
-    bool ContainsKey(string key);        
-    bool TryGetValue(
-        string key, 
-        [MaybeNullWhen(false)] out string? value);            
+    bool HasFormContentType { get; }        
+    IFormCollection? Form { get; set; }
+        
+    IFormCollection ReadForm();        
+    Task<IFormCollection> ReadFormAsync(CancellationToken cancellationToken);
 }
 
 ```
 
-###### 2.2.4.2 实现
+###### 2.3.5.2 form feature 实现
 
 ```c#
-internal class RequestCookieCollection : IRequestCookieCollection
+public class FormFeature : IFormFeature
 {
-    // empty collection
-    public static readonly RequestCookieCollection Empty = new RequestCookieCollection();
+    private readonly HttpRequest _request;
+    private readonly FormOptions _options;    
     
-    // emtpy kes
-    private static readonly string[] EmptyKeys = Array.Empty<string>();    
-    
-    // empty enumerator    
-    private static readonly Enumerator EmptyEnumerator = new Enumerator();    
-    private static readonly IEnumerator<KeyValuePair<string, string>> 
-        EmptyIEnumeratorType = EmptyEnumerator;
-    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
-    
-    private Dictionary<string, string>? Store { get; set; }
-    
-    /* 公共属性 */
-    
-    public int Count
+    private MediaTypeHeaderValue? ContentType
     {
         get
         {
-            if (Store == null)
-            {
-                return 0;
-            }
-            return Store.Count;
+            MediaTypeHeaderValue.TryParse(_request.ContentType, out var mt);
+            return mt;
         }
     }
     
-    public ICollection<string> Keys
+    public bool HasFormContentType
     {
         get
         {
-            if (Store == null)
+            // Set directly
+            if (Form != null)
             {
-                return EmptyKeys;
+                return true;
             }
-            return Store.Keys;
+            
+            var contentType = ContentType;
+            return HasApplicationFormContentType(contentType) || 
+                   HasMultipartFormContentType(contentType);
         }
     }
-    
-    public string? this[string key]
+            
+    private Task<IFormCollection>? _parsedFormTask;        
+    private IFormCollection? _form;    
+    public IFormCollection? Form
     {
-        get
+        get { return _form; }
+        set
         {
-            if (key == null)
-            {
-                throw new ArgumentNullException(nameof(key));
-            }
-            
-            if (Store == null)
-            {
-                return null;
-            }
-            
-            if (TryGetValue(key, out var value))
-            {
-                return value;
-            }
-            return null;
+            _parsedFormTask = null;
+            _form = value;
         }
     }
     
     /* 构造函数 */
-    
-    public RequestCookieCollection()
+                    
+    public FormFeature(IFormCollection form)
     {
-    }    
-    
-    public RequestCookieCollection(Dictionary<string, string> store)
-    {
-        Store = store;
-    }
-    
-    public RequestCookieCollection(int capacity)
-    {
-        Store = new Dictionary<string, string>(
-            capacity, 
-            StringComparer.OrdinalIgnoreCase);
-    }
-    
-    /* 静态方法 */
-    
-    public static RequestCookieCollection Parse(IList<string> values) => 
-        ParseInternal(
-        	values, 
-        	AppContext.TryGetSwitch(
-                ResponseCookies.EnableCookieNameEncoding, 
-                out var enabled) && 
-        	enabled);
-    
-    internal static RequestCookieCollection ParseInternal(
-        IList<string> values, 
-        bool enableCookieNameEncoding)
-    {
-        if (values.Count == 0)
+        if (form == null)
         {
-            return Empty;
+            throw new ArgumentNullException(nameof(form));
         }
         
-        if (CookieHeaderValue.TryParseList(values, out var cookies))
+        Form = form;
+        _request = default!;
+        _options = FormOptions.Default;
+    }
+        
+    public FormFeature(HttpRequest request) : this(request, FormOptions.Default)
+    {
+    }
+    
+    public FormFeature(HttpRequest request, FormOptions options)        
+    {
+        if (request == null)
         {
-            if (cookies.Count == 0)
+            throw new ArgumentNullException(nameof(request));
+        }
+        if (options == null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
+        
+        _request = request;
+        _options = options;
+    }
+    
+    /* 方法 */    
+    
+    public IFormCollection ReadForm()
+    {
+        if (Form != null)
+        {
+            return Form;
+        }
+        
+        if (!HasFormContentType)
+        {
+            throw new InvalidOperationException(
+                "Incorrect Content-Type: " + _request.ContentType);
+        }
+        
+        // TODO: Issue #456 Avoid Sync-over-Async 
+        // http://blogs.msdn.com/b/pfxteam/archive/2012/04/13/10293638.aspx
+        // TODO: How do we prevent thread exhaustion?
+        return ReadFormAsync().GetAwaiter().GetResult();
+    }
+    
+    /// <inheritdoc />
+    public Task<IFormCollection> ReadFormAsync() => ReadFormAsync(CancellationToken.None);
+    
+    /// <inheritdoc />
+    public Task<IFormCollection> ReadFormAsync(CancellationToken cancellationToken)
+    {
+        // Avoid state machine and task allocation for repeated reads
+        if (_parsedFormTask == null)
+        {
+            if (Form != null)
             {
-                return Empty;
+                _parsedFormTask = Task.FromResult(Form);
             }
-            
-            var collection = new RequestCookieCollection(cookies.Count);
-            var store = collection.Store!;
-            for (var i = 0; i < cookies.Count; i++)
+            else
             {
-                var cookie = cookies[i];     
-                var name = enableCookieNameEncoding 
-                    ? Uri.UnescapeDataString(cookie.Name.Value) 
-                    : cookie.Name.Value;
+                _parsedFormTask = InnerReadFormAsync(cancellationToken);
+            }
+        }
+        return _parsedFormTask;
+    }
+    
+    private async Task<IFormCollection> InnerReadFormAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!HasFormContentType)
+        {
+            throw new InvalidOperationException(
+                "Incorrect Content-Type: " + _request.ContentType);
+        }
+        
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        if (_request.ContentLength == 0)
+        {
+            return FormCollection.Empty;
+        }
+        
+        if (_options.BufferBody)
+        {
+            _request.EnableRewind(
+                _options.MemoryBufferThreshold, 
+                _options.BufferBodyLengthLimit);
+        }
+        
+        FormCollection? formFields = null;
+        FormFileCollection? files = null;
+        
+        // Some of these code paths use StreamReader 
+        // which does not support cancellation tokens.
+        using (cancellationToken.Register(
+                  state => ((HttpContext)state!).Abort(), 
+            	  _request.HttpContext))
+        {
+            var contentType = ContentType;
+            // Check the content-type
+            if (HasApplicationFormContentType(contentType))
+            {
+                var encoding = FilterEncoding(contentType.Encoding);
+                var formReader = new FormPipeReader(_request.BodyReader, encoding)
+                {
+                    ValueCountLimit = _options.ValueCountLimit,
+                    KeyLengthLimit = _options.KeyLengthLimit,
+                    ValueLengthLimit = _options.ValueLengthLimit,
+                };
+                formFields = new FormCollection(
+                    await formReader.ReadFormAsync(cancellationToken));
+            }
+            else if (HasMultipartFormContentType(contentType))
+            {
+                var formAccumulator = new KeyValueAccumulator();
                 
-                var value = Uri.UnescapeDataString(cookie.Value.Value);
-                store[name] = value;
+                var boundary = GetBoundary(
+                    contentType, 
+                    _options.MultipartBoundaryLengthLimit);
+                var multipartReader = new MultipartReader(boundary, _request.Body)
+                {
+                    HeadersCountLimit = _options.MultipartHeadersCountLimit,
+                    HeadersLengthLimit = _options.MultipartHeadersLengthLimit,
+                    BodyLengthLimit = _options.MultipartBodyLengthLimit,
+                };
+                var section = await multipartReader
+                    .ReadNextSectionAsync(cancellationToken);
+                while (section != null)
+                {
+                    // Parse the content disposition here 
+                    // and pass it further to avoid eparsings
+                    if (!ContentDispositionHeaderValue.TryParse(
+                        	section.ContentDisposition, 
+                        	out var contentDisposition))
+                    {
+                        throw new InvalidDataException(
+                            "Form section has invalid Content-Disposition value: " + 
+                            section.ContentDisposition);
+                    }
+                    
+                    if (contentDisposition.IsFileDisposition())
+                    {
+                        var fileSection = new FileMultipartSection(
+                            section, 
+                            contentDisposition);
+                        
+                        // Enable buffering for the file if not already done for the full body
+                        section.EnableRewind(
+                            _request
+                            	.HttpContext
+                            	.Response
+                            	.RegisterForDispose,
+                            _options.MemoryBufferThreshold, 
+                            _options.MultipartBodyLengthLimit);
+                        
+                        // Find the end
+                        await section.Body.DrainAsync(cancellationToken);
+                        
+                        var name = fileSection.Name;
+                        var fileName = fileSection.FileName;
+                        
+                        FormFile file;
+                        if (section.BaseStreamOffset.HasValue)
+                        {
+                            // Relative reference to buffered request body
+                            file = new FormFile(
+                                _request.Body, 
+                                section.BaseStreamOffset.GetValueOrDefault(), 
+                                section.Body.Length, 
+                                name, 
+                                fileName);
+                        }
+                        else
+                        {
+                            // Individually buffered file body
+                            file = new FormFile(
+                                section.Body, 
+                                0, 
+                                section.Body.Length, 
+                                name, 
+                                fileName);
+                        }
+                        file.Headers = new HeaderDictionary(section.Headers);
+                        
+                        if (files == null)
+                        {
+                            files = new FormFileCollection();
+                        }
+                        if (files.Count >= _options.ValueCountLimit)
+                        {
+                            throw new InvalidDataException(
+                                $"Form value count limit 
+                                "{_options.ValueCountLimit} exceeded.");
+                        }
+                        files.Add(file);
+                    }
+                    else if (contentDisposition.IsFormDisposition())
+                    {
+                        var formDataSection = new FormMultipartSection(
+                            section, 
+                            contentDisposition);
+                        
+                        // Content-Disposition: form-data; name="key" value                   
+                        // Do not limit the key name length here 
+                        // because the multipart headers length limit is already in effect.
+                        var key = formDataSection.Name;
+                        var value = await formDataSection.GetValueAsync();
+                        
+                        formAccumulator.Append(key, value);
+                        if (formAccumulator.ValueCount > _options.ValueCountLimit)
+                        {
+                            throw new InvalidDataException(
+                                $"Form value count limit 
+                                "{_options.ValueCountLimit} exceeded.");
+                        }
+                    }
+                    else
+                    {
+                        System
+                            .Diagnostics
+                            .Debug
+                            .Assert(
+                            	false, 
+                            	"Unrecognized content-disposition for this section: " +
+                            	section.ContentDisposition);
+                    }
+                    
+                    section = await multipartReader
+                        .ReadNextSectionAsync(cancellationToken);
+                }
+                
+                if (formAccumulator.HasValues)
+                {
+                    formFields = new FormCollection(
+                        formAccumulator.GetResults(), 
+                        files);
+                }
             }
-            
-            return collection;
         }
-        return Empty;
-    }
-            
-    /* 方法 */
-    
-    public bool ContainsKey(string key)
-    {
-        if (Store == null)
+        
+        // Rewind so later readers don't have to.
+        if (_request.Body.CanSeek)
         {
-            return false;
+            _request.Body.Seek(0, SeekOrigin.Begin);
         }
-        return Store.ContainsKey(key);
+        
+        if (formFields != null)
+        {
+            Form = formFields;
+        }
+        else if (files != null)
+        {
+            Form = new FormCollection(null, files);
+        }
+        else
+        {
+            Form = FormCollection.Empty;
+        }
+        
+        return Form;
     }
     
-    public bool TryGetValue(
-        string key, 
-        [MaybeNullWhen(false)] out string? value)
+    private static Encoding FilterEncoding(Encoding? encoding)
     {
-        if (Store == null)
+        // UTF-7 is insecure and should not be honored. 
+        // UTF-8 will succeed for most cases.
+        // https://docs.microsoft.com/en-us/dotnet/core/compatibility/syslib-warnings/syslib0001
+        if (encoding == null || encoding.CodePage == 65000)
         {
-            value = null;
-            return false;
+            return Encoding.UTF8;
         }
-        return Store.TryGetValue(key, out value);
-    }                
+        return encoding;
+    }
+    
+    private bool HasApplicationFormContentType(
+        [NotNullWhen(true)] MediaTypeHeaderValue? contentType)
+    {
+        // Content-Type: application/x-www-form-urlencoded; charset=utf-8
+        return contentType != null && 
+               contentType.MediaType
+            			  .Equals(
+            				   "application/x-www-form-urlencoded", 
+	         				   StringComparison.OrdinalIgnoreCase);
+    }
+    
+    private bool HasMultipartFormContentType(
+        [NotNullWhen(true)] MediaTypeHeaderValue? contentType)
+    {
+        // Content-Type: multipart/form-data; 
+        // boundary=----WebKitFormBoundarymx2fSWqWSd0OxQqq
+        return contentType != null && 
+               contentType.MediaType
+            			  .Equals(
+            				   "multipart/form-data", 
+            				   StringComparison.OrdinalIgnoreCase);
+    }
+    
+    private bool HasFormDataContentDisposition(
+        ContentDispositionHeaderValue contentDisposition)
+    {
+        // Content-Disposition: form-data; name="key";
+        return contentDisposition != null && 
+               contentDisposition.DispositionType
+            					 .Equals("form-data") && 
+               StringSegment.IsNullOrEmpty(contentDisposition.FileName) && 
+               StringSegment.IsNullOrEmpty(contentDisposition.FileNameStar);
+    }
+    
+    private bool HasFileContentDisposition(
+        ContentDispositionHeaderValue contentDisposition)
+    {
+        // Content-Disposition: form-data; name="myfile1"; filename="Misc 002.jpg"
+        return contentDisposition != null && 
+               contentDisposition.DispositionType
+            					 .Equals("form-data") && 
+               (!StringSegment.IsNullOrEmpty(contentDisposition.FileName) || 
+                !StringSegment.IsNullOrEmpty(contentDisposition.FileNameStar));
+    }
+    
+    // Content-Type: multipart/form-data; boundary="----WebKitFormBoundarymx2fSWqWSd0OxQqq"
+    // The spec says 70 characters is a reasonable limit.
+    private static string GetBoundary(
+        MediaTypeHeaderValue contentType, 
+        int lengthLimit)
+    {
+        var boundary = HeaderUtilities
+            .RemoveQuotes(contentType.Boundary);
+        if (StringSegment.IsNullOrEmpty(boundary))
+        {
+            throw new InvalidDataException("Missing content-type boundary.");
+        }
+        if (boundary.Length > lengthLimit)
+        {
+            throw new InvalidDataException(
+                $"Multipart boundary length limit {lengthLimit} exceeded.");
+        }
+        return boundary.ToString();
+    }
 }
 
 ```
 
-###### 2.2.4.3 迭代器
+###### 2.3.5.3 form options
 
 ```c#
-internal class RequestCookieCollection : IRequestCookieCollection
+public class FormOptions
 {
-    public Enumerator GetEnumerator()
-    {
-        if (Store == null || Store.Count == 0)
-        {
-            // Non-boxed Enumerator
-            return EmptyEnumerator;
-        }
-        // Non-boxed Enumerator
-        return new Enumerator(Store.GetEnumerator());
-    }
-    
-    
-    IEnumerator<KeyValuePair<string, string>> 
-        IEnumerable<KeyValuePair<string, string>>.GetEnumerator()
-    {
-        if (Store == null || Store.Count == 0)
-        {
-            // Non-boxed Enumerator
-            return EmptyIEnumeratorType;
-        }
-        // Boxed Enumerator
-        return GetEnumerator();
-    }
-    
-    
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        if (Store == null || Store.Count == 0)
-        {
-            // Non-boxed Enumerator
-            return EmptyIEnumerator;
-        }
-        // Boxed Enumerator
-        return GetEnumerator();
-    }
-    
-    public struct Enumerator : IEnumerator<KeyValuePair<string, string>>
-    {
-        // Do NOT make this readonly, or MoveNext will not work
-        private Dictionary<string, string>.Enumerator _dictionaryEnumerator;
-        private bool _notEmpty;
+    internal static readonly FormOptions Default = new FormOptions();
         
-        public KeyValuePair<string, string> Current
-        {
-            get
-            {
-                if (_notEmpty)
-                {
-                    var current = _dictionaryEnumerator.Current;
-                    return new KeyValuePair<string, string>(current.Key, current.Value);
-                }
-                return default(KeyValuePair<string, string>);
-            }
-        }
+    public const int DefaultMemoryBufferThreshold = 1024 * 64;        
+    public const int DefaultBufferBodyLengthLimit = 1024 * 1024 * 128;        
+    public const int DefaultMultipartBoundaryLengthLimit = 128;        
+    public const long DefaultMultipartBodyLengthLimit = 1024 * 1024 * 128;
         
-        object IEnumerator.Current
-        {
-            get
-            {
-                return Current;
-            }
-        }
-                
-        internal Enumerator(Dictionary<string, string>.Enumerator dictionaryEnumerator)
-        {
-            _dictionaryEnumerator = dictionaryEnumerator;
-            _notEmpty = true;
-        }
-        
-        public bool MoveNext()
-        {
-            if (_notEmpty)
-            {
-                return _dictionaryEnumerator.MoveNext();
-            }
-            return false;
-        }                
-        
-        public void Dispose()
-        {
-        }
-        
-        public void Reset()
-        {
-            if (_notEmpty)
-            {
-                ((IEnumerator)_dictionaryEnumerator).Reset();
-            }
-        }
-    }    
+    public bool BufferBody { get; set; } = false;        
+    public int MemoryBufferThreshold { get; set; } = DefaultMemoryBufferThreshold;        
+    public long BufferBodyLengthLimit { get; set; } = DefaultBufferBodyLengthLimit;        
+    public int ValueCountLimit { get; set; } = FormReader.DefaultValueCountLimit;        
+    public int KeyLengthLimit { get; set; } = FormReader.DefaultKeyLengthLimit;        
+    public int ValueLengthLimit { get; set; } = FormReader.DefaultValueLengthLimit;      
+    
+    public int MultipartBoundaryLengthLimit { get; set; } = 
+        DefaultMultipartBoundaryLengthLimit;        
+    public int MultipartHeadersCountLimit { get; set; } = 
+        MultipartReader.DefaultHeadersCountLimit;        
+    public int MultipartHeadersLengthLimit { get; set; } = 
+        MultipartReader.DefaultHeadersLengthLimit;        
+    public long MultipartBodyLengthLimit { get; set; } = 
+        DefaultMultipartBodyLengthLimit;
 }
 
 ```
 
-##### 2.2.5 form collection
-
-###### 2.2.5.1 接口
+###### 2.3.5.4 form collection 接口
 
 ```c#
 public interface IFormCollection : IEnumerable<KeyValuePair<string, StringValues>>
@@ -3098,31 +3626,16 @@ public interface IFormCollection : IEnumerable<KeyValuePair<string, StringValues
 
 ```
 
-###### 2.2.5.2 实现
+###### 2.3.5.5 form collection 实现
 
 ```c#
 public class FormCollection : IFormCollection
-{ 
-    // emtpy collection
-    public static readonly FormCollection Empty = new FormCollection();
-    
-    // emtpy keys
-    private static readonly string[] EmptyKeys = Array.Empty<string>();
-    
-    // empty enumerator
-    private static readonly Enumerator EmptyEnumerator = new Enumerator();        
-    private static readonly IEnumerator<KeyValuePair<string, StringValues>> 
-        EmptyIEnumeratorType = EmptyEnumerator;
-    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
-        
-    // form file collection
-    private static IFormFileCollection EmptyFiles = new FormFileCollection();
-    private IFormFileCollection? _files;
-    
+{     
+    // 静态 empty 实例
+    public static readonly FormCollection Empty = new FormCollection();        
+                                   
     private Dictionary<string, StringValues>? Store { get; set; }
-    
-    /* 公共属性 */
-    
+       
     public int Count
     {
         get
@@ -3130,7 +3643,8 @@ public class FormCollection : IFormCollection
             return Store?.Count ?? 0;
         }
     }
-        
+      
+    private static readonly string[] EmptyKeys = Array.Empty<string>(); 
     public ICollection<string> Keys
     {
         get
@@ -3161,6 +3675,8 @@ public class FormCollection : IFormCollection
         }
     }
     
+    private IFormFileCollection? _files;
+    private static IFormFileCollection EmptyFiles = new FormFileCollection();
     public IFormFileCollection Files
     {
         get => _files ?? EmptyFiles;
@@ -3206,16 +3722,12 @@ public class FormCollection : IFormCollection
     
     /* 迭代器 */
     
-   
-}
-
-```
-
-###### 2.2.5.3 迭代器
-
-```c#
-public class FormCollection : IFormCollection
-{ 
+    // empty enumerator
+    private static readonly Enumerator EmptyEnumerator = new Enumerator();        
+    private static readonly IEnumerator<KeyValuePair<string, StringValues>> 
+        EmptyIEnumeratorType = EmptyEnumerator;
+    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
+    
     public Enumerator GetEnumerator()        
     {
         if (Store == null || Store.Count == 0)
@@ -3307,11 +3819,10 @@ public class FormCollection : IFormCollection
         }
     }
 }
+
 ```
 
-##### 2.2.6 form file collection
-
-###### 2.2.6.1 接口
+###### 2.3.5.6 form file collection 接口
 
 ```c#
 public interface IFormFileCollection : IReadOnlyList<IFormFile>
@@ -3324,7 +3835,9 @@ public interface IFormFileCollection : IReadOnlyList<IFormFile>
 
 ```
 
-###### 2.2.6.2 实现
+
+
+###### 2.3.5.7 form file collection 实现
 
 ```c#
 public class FormFileCollection : List<IFormFile>, IFormFileCollection
@@ -3371,9 +3884,7 @@ public class FormFileCollection : List<IFormFile>, IFormFileCollection
 
 ```
 
-###### 2.2.6.3 form
-
-* 接口
+###### 2.3.5.8 form file 接口
 
 ```c#
 public interface IFormFile
@@ -3388,13 +3899,13 @@ public interface IFormFile
     Stream OpenReadStream();        
     void CopyTo(Stream target);        
     Task CopyToAsync(
-        Stream target, 
-        CancellationToken cancellationToken = default(CancellationToken));
+        	 Stream target, 
+	         CancellationToken cancellationToken = default(CancellationToken));
 }
 
 ```
 
-* 实现
+###### 2.3.5.9 form file 实现
 
 ```c#
 public class FormFile : IFormFile
@@ -3453,9 +3964,9 @@ public class FormFile : IFormFile
     public Stream OpenReadStream()
     {
         return new ReferenceReadStream(
-            _baseStream, 
-            _baseStreamOffset, 
-            Length);
+            		   _baseStream, 
+			           _baseStreamOffset, 
+            		   Length);
     }    
             
     public void CopyTo(Stream target)
@@ -3483,20 +3994,424 @@ public class FormFile : IFormFile
         using (var readStream = OpenReadStream())
         {
             await readStream.CopyToAsync(
-                target, 
-                DefaultBufferSize, 
-                cancellationToken);
+                				target, 
+				                DefaultBufferSize, 
+                				cancellationToken);
         }
     }
 }
 
 ```
 
-##### 2.2.7 route value dictionary
+##### 2.3.6 request cookies feature
+
+###### 2.3.6.1 request cookies feature 接口
 
 ```c#
-public class RouteValueDictionary : 
-	IDictionary<string, object?>, 
+public interface IRequestCookiesFeature
+{    
+    IRequestCookieCollection Cookies { get; set; }
+}
+
+```
+
+###### 2.3.6.2 request cookies feature 实现
+
+```c#
+public class RequestCookiesFeature : IRequestCookiesFeature
+{    
+    // http request feature with default (null)    
+    private FeatureReferences<IHttpRequestFeature> _features;
+    private IHttpRequestFeature HttpRequestFeature =>
+        _features.Fetch(ref _features.Cache, _nullRequestFeature)!;
+    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
+        _nullRequestFeature = f => null;
+        
+    private StringValues _original;
+    private IRequestCookieCollection? _parsedValues;
+    
+    public IRequestCookieCollection Cookies
+    {
+        get
+        {
+            if (_features.Collection == null)
+            {
+                if (_parsedValues == null)
+                {
+                    _parsedValues = RequestCookieCollection.Empty;
+                }
+                return _parsedValues;
+            }
+            
+            var headers = HttpRequestFeature.Headers;
+            StringValues current;
+            if (!headers.TryGetValue(HeaderNames.Cookie, out current))
+            {
+                current = string.Empty;
+            }
+            
+            if (_parsedValues == null || _original != current)
+            {
+                _original = current;
+                _parsedValues = RequestCookieCollection.Parse(current.ToArray());
+            }
+            
+            return _parsedValues;
+        }
+        set
+        {
+            _parsedValues = value;
+            _original = StringValues.Empty;
+            if (_features.Collection != null)
+            {
+                if (_parsedValues == null || _parsedValues.Count == 0)
+                {
+                    HttpRequestFeature
+                        .Headers
+                        .Remove(HeaderNames.Cookie);
+                }
+                else
+                {
+                    var headers = new List<string>(_parsedValues.Count);
+                    foreach (var pair in _parsedValues)
+                    {
+                        headers.Add(
+                            new CookieHeaderValue(pair.Key, pair.Value).ToString());
+                    }
+                    _original = headers.ToArray();
+                    HttpRequestFeature.Headers[HeaderNames.Cookie] = _original;
+                }
+            }
+        }
+    }
+    
+    /* 构造函数 */
+    
+    public RequestCookiesFeature(IRequestCookieCollection cookies)
+    {
+        if (cookies == null)
+        {
+            throw new ArgumentNullException(nameof(cookies));
+        }
+        
+        _parsedValues = cookies;
+    }
+            
+    public RequestCookiesFeature(IFeatureCollection features)
+    {
+        if (features == null)
+        {
+            throw new ArgumentNullException(nameof(features));
+        }
+        
+        features.Initalize(features);
+        
+    }                        
+}
+
+```
+
+###### 2.3.6.3 request cookie collection 接口
+
+```c#
+public interface IRequestCookieCollection : IEnumerable<KeyValuePair<string, string>>
+{    
+    int Count { get; }        
+    ICollection<string> Keys { get; }
+    string? this[string key] { get; }
+    
+    bool ContainsKey(string key);        
+    bool TryGetValue(
+        	 string key, 
+	         [MaybeNullWhen(false)] out string? value);            
+}
+
+```
+
+###### 2.3.6.4 request cookie collection 实现
+
+```c#
+internal class RequestCookieCollection : IRequestCookieCollection
+{
+    // 静态 empty 实例
+    public static readonly RequestCookieCollection Empty = new RequestCookieCollection();
+                        
+    private Dictionary<string, string>? Store { get; set; }
+           
+    public int Count
+    {
+        get
+        {
+            if (Store == null)
+            {
+                return 0;
+            }
+            return Store.Count;
+        }
+    }
+    
+    private static readonly string[] EmptyKeys = Array.Empty<string>();   
+    public ICollection<string> Keys
+    {
+        get
+        {
+            if (Store == null)
+            {
+                return EmptyKeys;
+            }
+            return Store.Keys;
+        }
+    }
+    
+    public string? this[string key]
+    {
+        get
+        {
+            if (key == null)
+            {
+                throw new ArgumentNullException(nameof(key));
+            }
+            
+            if (Store == null)
+            {
+                return null;
+            }
+            
+            if (TryGetValue(key, out var value))
+            {
+                return value;
+            }
+            return null;
+        }
+    }
+    
+    /* 构造函数 */
+    
+    public RequestCookieCollection()
+    {
+    }    
+    
+    public RequestCookieCollection(Dictionary<string, string> store)
+    {
+        Store = store;
+    }
+    
+    public RequestCookieCollection(int capacity)
+    {
+        Store = new Dictionary<string, string>(
+            			capacity, 
+			            StringComparer.OrdinalIgnoreCase);
+    }
+    
+    /* 静态方法 */
+    
+    public static RequestCookieCollection Parse(IList<string> values) => 
+        ParseInternal(
+        	values, 
+        	AppContext.TryGetSwitch(
+                		   ResponseCookies.EnableCookieNameEncoding, 
+			               out var enabled) && 
+        	enabled);
+    
+    internal static RequestCookieCollection ParseInternal(
+        IList<string> values, 
+        bool enableCookieNameEncoding)
+    {
+        if (values.Count == 0)
+        {
+            return Empty;
+        }
+        
+        if (CookieHeaderValue.TryParseList(values, out var cookies))
+        {
+            if (cookies.Count == 0)
+            {
+                return Empty;
+            }
+            
+            var collection = new RequestCookieCollection(cookies.Count);
+            var store = collection.Store!;
+            for (var i = 0; i < cookies.Count; i++)
+            {
+                var cookie = cookies[i];    
+                
+                var name = enableCookieNameEncoding 
+                    		   ? Uri.UnescapeDataString(cookie.Name.Value) 
+		                       : cookie.Name.Value;                
+                var value = Uri.UnescapeDataString(cookie.Value.Value);
+                
+                store[name] = value;
+            }
+            
+            return collection;
+        }
+        return Empty;
+    }
+            
+    /* 方法 */
+    
+    public bool ContainsKey(string key)
+    {
+        if (Store == null)
+        {
+            return false;
+        }
+        return Store.ContainsKey(key);
+    }
+    
+    public bool TryGetValue(
+        string key, 
+        [MaybeNullWhen(false)] out string? value)
+    {
+        if (Store == null)
+        {
+            value = null;
+            return false;
+        }
+        return Store.TryGetValue(key, out value);
+    }     
+    
+    /* 迭代器 */
+    
+    // empty enumerator    
+    private static readonly Enumerator EmptyEnumerator = new Enumerator();    
+    private static readonly IEnumerator<KeyValuePair<string, string>> 
+        EmptyIEnumeratorType = EmptyEnumerator;
+    private static readonly IEnumerator EmptyIEnumerator = EmptyEnumerator;
+    
+    public Enumerator GetEnumerator()
+    {
+        if (Store == null || Store.Count == 0)
+        {
+            // Non-boxed Enumerator
+            return EmptyEnumerator;
+        }
+        // Non-boxed Enumerator
+        return new Enumerator(Store.GetEnumerator());
+    }
+        
+    IEnumerator<KeyValuePair<string, string>> 
+        IEnumerable<KeyValuePair<string, string>>.GetEnumerator()
+    {
+        if (Store == null || Store.Count == 0)
+        {
+            // Non-boxed Enumerator
+            return EmptyIEnumeratorType;
+        }
+        // Boxed Enumerator
+        return GetEnumerator();
+    }
+        
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        if (Store == null || Store.Count == 0)
+        {
+            // Non-boxed Enumerator
+            return EmptyIEnumerator;
+        }
+        // Boxed Enumerator
+        return GetEnumerator();
+    }
+    
+    // enumerator 结构体
+    public struct Enumerator : IEnumerator<KeyValuePair<string, string>>
+    {
+        // Do NOT make this readonly, or MoveNext will not work
+        private Dictionary<string, string>.Enumerator _dictionaryEnumerator;
+        private bool _notEmpty;
+        
+        public KeyValuePair<string, string> Current
+        {
+            get
+            {
+                if (_notEmpty)
+                {
+                    var current = _dictionaryEnumerator.Current;
+                    return new KeyValuePair<string, string>(current.Key, current.Value);
+                }
+                return default(KeyValuePair<string, string>);
+            }
+        }
+        
+        object IEnumerator.Current
+        {
+            get
+            {
+                return Current;
+            }
+        }
+                
+        internal Enumerator(Dictionary<string, string>.Enumerator dictionaryEnumerator)
+        {
+            _dictionaryEnumerator = dictionaryEnumerator;
+            _notEmpty = true;
+        }
+        
+        public bool MoveNext()
+        {
+            if (_notEmpty)
+            {
+                return _dictionaryEnumerator.MoveNext();
+            }
+            return false;
+        }                
+        
+        public void Dispose()
+        {
+        }
+        
+        public void Reset()
+        {
+            if (_notEmpty)
+            {
+                ((IEnumerator)_dictionaryEnumerator).Reset();
+            }
+        }
+    }        
+}
+
+```
+
+##### 2.3.7 route value feature
+
+###### 2.3.7.1 接口
+
+```c#
+public interface IRouteValuesFeature
+{    
+    RouteValueDictionary RouteValues { get; set; }
+}
+
+```
+
+###### 2.3.7.2 实现
+
+```c#
+public class RouteValuesFeature : IRouteValuesFeature
+{
+    private RouteValueDictionary? _routeValues;           
+    public RouteValueDictionary RouteValues
+    {
+        get
+        {
+            if (_routeValues == null)
+            {
+                _routeValues = new RouteValueDictionary();
+            }
+            
+            return _routeValues;
+        }
+        set => _routeValues = value;
+    }
+}
+
+```
+
+###### 2.3.7.3 route value dictionary
+
+```c#
+public class RouteValueDictionary : 		
+	IDictionary<string, object?>, 	
 	IReadOnlyDictionary<string, object?>
 {
     // 4 is a good default capacity here because 
@@ -3505,7 +4420,56 @@ public class RouteValueDictionary :
         
     internal KeyValuePair<string, object?>[] _arrayStorage;
     internal PropertyStorage? _propertyStorage;
-    private int _count;
+        
+    public IEqualityComparer<string> Comparer => StringComparer.OrdinalIgnoreCase;
+
+    private int _count;    
+    public int Count => _count;
+    
+    /// <inheritdoc />
+    bool ICollection<KeyValuePair<string, object?>>.IsReadOnly => false;
+    
+    /* keys */
+    public ICollection<string> Keys
+    {
+        get
+        {
+            EnsureCapacity(_count);
+            
+            var array = _arrayStorage;
+            var keys = new string[_count];
+            for (var i = 0; i < keys.Length; i++)
+            {
+                keys[i] = array[i].Key;
+            }
+            
+            return keys;
+        }
+    }
+    
+    IEnumerable<string> IReadOnlyDictionary<string, object?>.Keys => Keys;
+    
+    /* values */
+    public ICollection<object?> Values
+    {
+        get
+        {
+            EnsureCapacity(_count);
+            
+            var array = _arrayStorage;
+            var values = new object?[_count];
+            for (var i = 0; i < values.Length; i++)
+            {
+                values[i] = array[i].Value;
+            }
+            
+            return values;
+        }
+    }
+    
+    IEnumerable<object?> IReadOnlyDictionary<string, object?>.Values => Values;
+    
+    
     
     
     public static RouteValueDictionary FromArray(KeyValuePair<string, object?>[] items)
@@ -3668,53 +4632,7 @@ public class RouteValueDictionary :
     }
 
         
-        public IEqualityComparer<string> Comparer => StringComparer.OrdinalIgnoreCase;
-
-        /// <inheritdoc />
-        public int Count => _count;
-
-        /// <inheritdoc />
-        bool ICollection<KeyValuePair<string, object?>>.IsReadOnly => false;
-
-        /// <inheritdoc />
-        public ICollection<string> Keys
-        {
-            get
-            {
-                EnsureCapacity(_count);
-
-                var array = _arrayStorage;
-                var keys = new string[_count];
-                for (var i = 0; i < keys.Length; i++)
-                {
-                    keys[i] = array[i].Key;
-                }
-
-                return keys;
-            }
-        }
-
-        IEnumerable<string> IReadOnlyDictionary<string, object?>.Keys => Keys;
-
-        /// <inheritdoc />
-        public ICollection<object?> Values
-        {
-            get
-            {
-                EnsureCapacity(_count);
-
-                var array = _arrayStorage;
-                var values = new object?[_count];
-                for (var i = 0; i < values.Length; i++)
-                {
-                    values[i] = array[i].Value;
-                }
-
-                return values;
-            }
-        }
-
-        IEnumerable<object?> IReadOnlyDictionary<string, object?>.Values => Values;
+        
 
         /// <inheritdoc />
         void ICollection<KeyValuePair<string, object?>>.Add(KeyValuePair<string, object?> item)
@@ -3816,6 +4734,8 @@ public class RouteValueDictionary :
             Array.Copy(storage, 0, array, arrayIndex, _count);
         }
 
+    
+    
         /// <inheritdoc />
         public Enumerator GetEnumerator()
         {
@@ -4244,11 +5164,67 @@ public class RouteValueDictionary :
     }
 ```
 
+##### 2.3.8 request body pipe feature
 
+###### 2.3.8.1 接口
 
-#### 2.3 http response
+```c#
+public interface IRequestBodyPipeFeature
+{    
+    PipeReader Reader { get; }
+}
 
-##### 2.3.1 抽象基类
+```
+
+###### 2.3.8.2 实现
+
+```c#
+public class RequestBodyPipeFeature : IRequestBodyPipeFeature
+{
+    private PipeReader? _internalPipeReader;
+    private Stream? _streamInstanceWhenWrapped;
+    private HttpContext _context;
+    
+    public PipeReader Reader
+    {
+        get
+        {
+            if (_internalPipeReader == null ||
+                !ReferenceEquals(
+                    _streamInstanceWhenWrapped, 
+                    _context.Request.Body))
+            {
+                _streamInstanceWhenWrapped = _context.Request.Body;
+                _internalPipeReader = PipeReader.Create(_context.Request.Body);
+                
+                _context.Response.OnCompleted(
+                    self =>
+                    {
+                        ((PipeReader)self).Complete();
+                        return Task.CompletedTask;
+                    },
+                    _internalPipeReader);
+            }
+            
+            return _internalPipeReader;
+        }
+    }
+    
+    public RequestBodyPipeFeature(HttpContext context)
+    {
+        if (context == null)
+        {
+            throw new ArgumentNullException(nameof(context));
+        }
+       _context = context;
+    }    
+}
+
+```
+
+#### 2.4 http response
+
+##### 2.4.1 抽象基类
 
 ```c#
 public abstract class HttpResponse
@@ -4323,20 +5299,21 @@ public abstract class HttpResponse
 
 ```
 
-##### 2.3.2 默认实现
+##### 2.4.2 default http response
 
 ```c#
 internal sealed class DefaultHttpResponse : HttpResponse
 {            
     private readonly DefaultHttpContext _context;
     
-    private FeatureReferences<FeatureInterfaces> _features;
     struct FeatureInterfaces
     {
         public IHttpResponseFeature? Response;
         public IHttpResponseBodyFeature? ResponseBody;
         public IResponseCookiesFeature? Cookies;
     }
+    private FeatureReferences<FeatureInterfaces> _features;
+    
     
     public DefaultHttpResponse(DefaultHttpContext context)
     {
@@ -4417,40 +5394,63 @@ internal sealed class DefaultHttpResponse : HttpResponse
 
 ```
 
-###### 2.3.2.1 公共属性
+###### 2.4.2.1 props
 
 ```c#
 internal sealed class DefaultHttpResponse : HttpResponse
 {
     public override HttpContext HttpContext { get { return _context; } }
     
+    /* http response feature with default (null) */
+    private IHttpResponseFeature HttpResponseFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Response, 
+			          _nullResponseFeature)!;    
+    private readonly static Func<IFeatureCollection, IHttpResponseFeature?> 
+        _nullResponseFeature = f => null;
+    
+    // 从 http response feature 解析 status code
     public override int StatusCode
     {
         get { return HttpResponseFeature.StatusCode; }
         set { HttpResponseFeature.StatusCode = value; }
     }
     
+    // 从 http response feature 解析 has started
     public override bool HasStarted
     {
         get { return HttpResponseFeature.HasStarted; }
     }
     
+    // 从 http response feature 解析 (response headers)
     public override IHeaderDictionary Headers
     {
         get { return HttpResponseFeature.Headers; }
     }
     
+    /* response cookies feature with default */ 
+    private IResponseCookiesFeature ResponseCookiesFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Cookies, 
+			          _newResponseCookiesFeature)!;
+    
+    private readonly static Func<IFeatureCollection, IResponseCookiesFeature?> 
+        _newResponseCookiesFeature = f => new ResponseCookiesFeature(f);
+    
+    // 从 response cookies feature 解析 response cookies
     public override IResponseCookies Cookies
     {
         get { return ResponseCookiesFeature.Cookies; }
     }
     
+    // 从 (response) headers 解析 content length
     public override long? ContentLength
     {
         get { return Headers.ContentLength; }
         set { Headers.ContentLength = value; }
     }
     
+    // 从 (response) headers 解析 content type
     public override string ContentType
     {
         get
@@ -4461,44 +5461,54 @@ internal sealed class DefaultHttpResponse : HttpResponse
         {
             if (string.IsNullOrEmpty(value))
             {
-                HttpResponseFeature
-                    .Headers
-                    .Remove(HeaderNames.ContentType);
+                HttpResponseFeature.Headers
+				                   .Remove(HeaderNames.ContentType);
             }
             else
             {
-                HttpResponseFeature
-                    .Headers[HeaderNames.ContentType] = value;
+                HttpResponseFeature.Headers[HeaderNames.ContentType] = value;
             }
         }
     }
     
+    /* http response body feature with default */
+    private IHttpResponseBodyFeature HttpResponseBodyFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.ResponseBody, 
+			          _nullResponseBodyFeature)!;
+    
+    private readonly static Func<IFeatureCollection, IHttpResponseBodyFeature?> 
+        _nullResponseBodyFeature = f => null;
+    
+    // 从 response body feature 解析 stream
     public override Stream Body
     {
         get { return HttpResponseBodyFeature.Stream; }
         set
         {
-            var otherFeature = _features
-                .Collection
-                .Get<IHttpResponseBodyFeature>()!;
+            var otherFeature = _features.Collection
+                						.Get<IHttpResponseBodyFeature>()!;
             
-            if (otherFeature is StreamResponseBodyFeature streamFeature
-                && streamFeature.PriorFeature != null
-                && object.ReferenceEquals(
-                    value, 
-                    streamFeature.PriorFeature.Stream))
+            if (otherFeature is StreamResponseBodyFeature streamFeature && 
+                streamFeature.PriorFeature != null && 
+                object.ReferenceEquals(
+                	       value, 
+	                       streamFeature.PriorFeature.Stream))
             {
                 // They're reverting the stream back to the prior one. 
                 // Revert the whole feature.
-                _features.Collection.Set(streamFeature.PriorFeature);
+                _features.Collection
+                    	 .Set(streamFeature.PriorFeature);
                 return;
             }
             
-            _features.Collection.Set<IHttpResponseBodyFeature>(
-                new StreamResponseBodyFeature(value, otherFeature));
+            _features.Collection
+                	 .Set<IHttpResponseBodyFeature>(
+                		  new StreamResponseBodyFeature(value, otherFeature));
         }
     }
-                        
+                      
+    // 从 response body feature 解析 body writer
     public override PipeWriter BodyWriter
     {
         get { return HttpResponseBodyFeature.Writer; }
@@ -4507,56 +5517,26 @@ internal sealed class DefaultHttpResponse : HttpResponse
 
 ```
 
-###### 2.3.2.2 features
-
-```c#
-internal sealed class DefaultHttpResponse : HttpResponse
-{
-    // feature
-    private IHttpResponseFeature HttpResponseFeature =>
-        _features.Fetch(ref _features.Cache.Response, _nullResponseFeature)!;
-
-    private IHttpResponseBodyFeature HttpResponseBodyFeature =>
-        _features.Fetch(ref _features.Cache.ResponseBody, _nullResponseBodyFeature)!;
-    
-    private IResponseCookiesFeature ResponseCookiesFeature =>
-        _features.Fetch(ref _features.Cache.Cookies, _newResponseCookiesFeature)!;
-    
-    // default
-    private readonly static Func<IFeatureCollection, IHttpResponseFeature?> 
-        _nullResponseFeature = f => null;
-    
-    private readonly static Func<IFeatureCollection, IHttpResponseBodyFeature?> 
-        _nullResponseBodyFeature = f => null;
-    
-    private readonly static Func<IFeatureCollection, IResponseCookiesFeature?> 
-        _newResponseCookiesFeature = f => new ResponseCookiesFeature(f);
-}
-
-```
-
-###### 2.3.2.3 扩展
+###### 2.4.2.2 扩展方法
 
 ```c#
 public static class ResponseExtensions
-{
-    
+{    
     public static void Clear(this HttpResponse response)
     {
         if (response.HasStarted)
         {
             throw new InvalidOperationException(
-                "The response cannot be cleared, 
-                "it has already started sending.");
+                		  "The response cannot be cleared, 
+		                  "it has already started sending.");
         }
         
         response.StatusCode = 200;
         
-        response
-            .HttpContext
-            .Features
-            .Get<IHttpResponseFeature>()
-            !.ReasonPhrase = null;
+        response.HttpContext
+	            .Features
+    	        .Get<IHttpResponseFeature>()
+        	    !.ReasonPhrase = null;
         
         response.Headers.Clear();
         if (response.Body.CanSeek)
@@ -4574,15 +5554,15 @@ public static class ResponseExtensions
         if (preserveMethod)
         {
             response.StatusCode = permanent 
-                ? StatusCodes.Status308PermanentRedirect 
-                : StatusCodes.Status307TemporaryRedirect;
+                					  ? StatusCodes.Status308PermanentRedirect 
+					                  : StatusCodes.Status307TemporaryRedirect;
         }
         else
         {
             
             response.StatusCode = permanent 
-                ? StatusCodes.Status301MovedPermanently 
-                : StatusCodes.Status302Found;
+                					  ? StatusCodes.Status301MovedPermanently 
+					                  : StatusCodes.Status302Found;
         }
         
         response.Headers[HeaderNames.Location] = location;
@@ -4591,7 +5571,7 @@ public static class ResponseExtensions
 
 ```
 
-###### 2.3.2.4 send file 扩展
+###### 2.4.2.3 扩展方法 - send file
 
 ```c#
 public static class SendFileResponseExtensions
@@ -4616,10 +5596,14 @@ public static class SendFileResponseExtensions
             throw new ArgumentNullException(nameof(file));
         }
         
-        return SendFileAsyncCore(response, file, 0, null, cancellationToken);
+        return SendFileAsyncCore(
+            	   response, 
+            	   file, 
+            	   0, 
+            	   null, 
+            	   cancellationToken);
     }
-    
-        
+            
     [SuppressMessage(
         "ApiDesign", 
         "RS0026:Do not add multiple public overloads with optional parameters", 
@@ -4641,13 +5625,12 @@ public static class SendFileResponseExtensions
         }
         
         return SendFileAsyncCore(
-            response, 
-            file, 
-            offset, 
-            count, 
-            cancellationToken);
+            	   response, 
+		           file, 
+        		   offset, 
+		           count, 
+        		   cancellationToken);
     }
-
         
     [SuppressMessage(
         "ApiDesign", 
@@ -4668,15 +5651,13 @@ public static class SendFileResponseExtensions
         }
         
         return SendFileAsyncCore(
-            response, 
-            fileName, 
-            0, 
-            null, 
-            cancellationToken);
+            	   response, 
+		           fileName, 
+        		   0, 
+		           null, 
+        		   cancellationToken);
     }
-
-        
-    
+            
     [SuppressMessage(
         "ApiDesign", 
         "RS0026:Do not add multiple public overloads with optional parameters", 
@@ -4698,10 +5679,11 @@ public static class SendFileResponseExtensions
         }
         
         return SendFileAsyncCore(
-            response, 
-            fileName, 
-            offset, 
-            count, cancellationToken);
+            	   response, 
+		           fileName, 
+        		   offset, 
+		           count, 
+		      	   cancellationToken);
     }
 
     private static async Task SendFileAsyncCore(
@@ -4728,13 +5710,12 @@ public static class SendFileResponseExtensions
                 {
                     fileContent.Seek(offset, SeekOrigin.Begin);
                 }
-                await StreamCopyOperation
-                    .CopyToAsync(
-                    	fileContent, 
-                    	response.Body, 
-                    	count, 
-                    	StreamCopyBufferSize, 
-                    	localCancel);
+                await StreamCopyOperation.CopyToAsync(
+                    fileContent, 
+                    response.Body, 
+                    count, 
+                    StreamCopyBufferSize, 
+                    localCancel);
             }
             catch (OperationCanceledException) when (useRequestAborted) 
             {
@@ -4742,12 +5723,11 @@ public static class SendFileResponseExtensions
         }
         else
         {
-            await response
-                .SendFileAsync(
-                	file.PhysicalPath, 
-                	offset, 
-                	count, 
-                	cancellationToken);
+            await response.SendFileAsync(
+	               	  		   file.PhysicalPath, 
+		                  	   offset, 
+          			      	   count, 
+                			   cancellationToken);
         }
     }
     
@@ -4762,18 +5742,17 @@ public static class SendFileResponseExtensions
         var localCancel = useRequestAborted 
             ? response.HttpContext.RequestAborted 
             : cancellationToken;
-        var sendFile = response
-            .HttpContext
-            .Features
-            .Get<IHttpResponseBodyFeature>()!;
+        var sendFile = response.HttpContext
+					           .Features
+					           .Get<IHttpResponseBodyFeature>()!;
         
         try
         {
             await sendFile.SendFileAsync(
-                fileName, 
-                offset, 
-                count, 
-                localCancel);
+                			  fileName, 
+			                  offset, 
+              				  count, 
+			                  localCancel);
         }
         catch (OperationCanceledException) when (useRequestAborted) { }
     }
@@ -4795,16 +5774,16 @@ public static class SendFileResponseExtensions
              count.GetValueOrDefault() > fileLength - offset))
         {
             throw new ArgumentOutOfRangeException(
-                nameof(count), 
-                count, 
-                string.Empty);
+                		  nameof(count), 
+		                  count, 
+          			      string.Empty);
         }
     }
 }
 
 ```
 
-###### 2.3.2.5 writing 扩展
+###### 2.4.2.4 扩展方法 - write
 
 ```c#
 public static class HttpResponseWritingExtensions
@@ -4834,7 +5813,6 @@ public static class HttpResponseWritingExtensions
             Encoding.UTF8, 
             cancellationToken);
     }
-
         
     [SuppressMessage(
         "ApiDesign", 
@@ -4876,9 +5854,8 @@ public static class HttpResponseWritingExtensions
         
         Write(response, text, encoding);
         
-        var flushAsyncTask = response
-            .BodyWriter
-            .FlushAsync(cancellationToken);
+        var flushAsyncTask = response.BodyWriter
+						             .FlushAsync(cancellationToken);
         if (flushAsyncTask.IsCompletedSuccessfully)
         {
             // Most implementations of ValueTask reset state in GetResult, 
@@ -4978,53 +5955,246 @@ public static class HttpResponseWritingExtensions
 
 ```
 
-###### 2.3.2.6 trailer 扩展
+###### 2.4.2.5 扩展方法 - write json
+
+```c#
+public static partial class HttpResponseJsonExtensions
+{        
+    [SuppressMessage(
+        "ApiDesign", 
+        "RS0026:Do not add multiple public overloads with optional parameters", 
+        Justification = "Required to maintain compatibility")]
+    public static Task WriteAsJsonAsync<TValue>(
+        this HttpResponse response,
+        TValue value,
+        CancellationToken cancellationToken = default)
+    {
+        return response.WriteAsJsonAsync<TValue>(
+            value, 
+            options: null, 
+            contentType: null, 
+            cancellationToken);
+    }
+        
+    [SuppressMessage(
+        "ApiDesign", 
+        "RS0026:Do not add multiple public overloads with optional parameters", 
+        Justification = "Required to maintain compatibility")]
+    public static Task WriteAsJsonAsync<TValue>(
+        this HttpResponse response,
+        TValue value,
+        JsonSerializerOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        return response.WriteAsJsonAsync<TValue>(
+            value, 
+            options, 
+            contentType: null, 
+            cancellationToken);
+    }
+       
+    [SuppressMessage(
+        "ApiDesign", 
+        "RS0026:Do not add multiple public overloads with optional parameters", 
+        Justification = "Required to maintain compatibility")]
+    public static Task WriteAsJsonAsync<TValue>(
+        this HttpResponse response,
+        TValue value,
+        JsonSerializerOptions? options,
+        string? contentType,
+        CancellationToken cancellationToken = default)
+    {
+        if (response == null)
+        {
+            throw new ArgumentNullException(nameof(response));
+        }
+        
+        options ??= ResolveSerializerOptions(response.HttpContext);        
+        response.ContentType = contentType ?? JsonConstants.JsonContentTypeWithCharset;
+        
+        return JsonSerializer.SerializeAsync<TValue>(
+            response.Body, 
+            value, 
+            options, 
+            cancellationToken);
+    }
+        
+    [SuppressMessage(
+        "ApiDesign", 
+        "RS0026:Do not add multiple public overloads with optional parameters", 
+        Justification = "Required to maintain compatibility")]
+    public static Task WriteAsJsonAsync(
+        this HttpResponse response,
+        object? value,
+        Type type,
+        CancellationToken cancellationToken = default)
+    {
+        return response.WriteAsJsonAsync(
+            value, 
+            type, 
+            options: null, 
+            contentType: null, 
+            cancellationToken);
+    }
+        
+    [SuppressMessage(
+        "ApiDesign", 
+        "RS0026:Do not add multiple public overloads with optional parameters", 
+        Justification = "Required to maintain compatibility")]
+    public static Task WriteAsJsonAsync(
+        this HttpResponse response,
+        object? value,
+        Type type,
+        JsonSerializerOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        return response.WriteAsJsonAsync(
+            value, 
+            type, 
+            options, 
+            contentType: null, 
+            cancellationToken);
+    }
+        
+    [SuppressMessage(
+        "ApiDesign", 
+        "RS0026:Do not add multiple public overloads with optional parameters", 
+        Justification = "Required to maintain compatibility")]
+    public static Task WriteAsJsonAsync(
+        this HttpResponse response,
+        object? value,
+        Type type,
+        JsonSerializerOptions? options,
+        string? contentType,
+        CancellationToken cancellationToken = default)
+    {
+        if (response == null)
+        {
+            throw new ArgumentNullException(nameof(response));
+        }
+        if (type == null)
+        {
+            throw new ArgumentNullException(nameof(type));
+        }
+        
+        options ??= ResolveSerializerOptions(response.HttpContext);        
+        response.ContentType = contentType ?? JsonConstants.JsonContentTypeWithCharset;
+        
+        return JsonSerializer.SerializeAsync(
+            response.Body, 
+            value, 
+            type, 
+            options, 
+            cancellationToken);
+    }
+    
+    private static JsonSerializerOptions ResolveSerializerOptions(HttpContext httpContext)
+    {
+        // Attempt to resolve options from DI then fallback to default options
+        return httpContext.RequestServices
+            			  ?.GetService<IOptions<JsonOptions>>()
+            			  ?.Value?.SerializerOptions 
+            			  ?? JsonOptions.DefaultSerializerOptions;
+    }
+}
+
+```
+
+###### 2.4.2.6 扩展方法 - trailer
 
 ```c#
 public static class ResponseTrailerExtensions
-{
-    
+{    
     public static void DeclareTrailer(
         this HttpResponse response, 
         string trailerName)
     {
-        response
-            .Headers
-            .AppendCommaSeparatedValues(
-            	HeaderNames.Trailer, 
-            	trailerName);
+        response.Headers.AppendCommaSeparatedValues(
+		            		HeaderNames.Trailer, 
+        		    		trailerName);
     }
         
     public static bool SupportsTrailers(this HttpResponse response)
     {
-        var feature = response
-            .HttpContext
-            .Features
-            .Get<IHttpResponseTrailersFeature>();
+        var feature = response.HttpContext
+            				  .Features
+            				  .Get<IHttpResponseTrailersFeature>();
         
         return feature?.Trailers != null && 
                !feature.Trailers.IsReadOnly;
     }
-    
-    
+        
     public static void AppendTrailer(
         this HttpResponse response, 
         string trailerName, 
         StringValues trailerValues)
     {
-        var feature = response
-            .HttpContext
-            .Features
-            .Get<IHttpResponseTrailersFeature>();
+        var feature = response.HttpContext
+            				  .Features
+            				  .Get<IHttpResponseTrailersFeature>();
         
         if (feature?.Trailers == null || 
             feature.Trailers.IsReadOnly)
         {
             throw new InvalidOperationException(
-                "Trailers are not supported for this response.");
+                		  "Trailers are not supported for this response.");
         }
         
-        feature.Trailers.Append(trailerName, trailerValues);
+        feature.Trailers
+               .Append(trailerName, trailerValues);
+    }
+}
+
+```
+
+##### 2.4.3 http response feature
+
+###### 2.4.3.1 接口
+
+```c#
+public interface IHttpResponseFeature
+{    
+    int StatusCode { get; set; }        
+    string? ReasonPhrase { get; set; }        
+    IHeaderDictionary Headers { get; set; }        
+    [Obsolete("Use IHttpResponseBodyFeature.Stream instead.", error: false)]
+    Stream Body { get; set; }        
+    bool HasStarted { get; }
+        
+    void OnStarting(Func<object, Task> callback, object state);        
+    void OnCompleted(Func<object, Task> callback, object state);
+}
+
+```
+
+###### 2.4.3.2 实现
+
+```c#
+public class HttpResponseFeature : IHttpResponseFeature
+{
+    public int StatusCode { get; set; }        
+    public string? ReasonPhrase { get; set; }        
+    public IHeaderDictionary Headers { get; set; }        
+    public Stream Body { get; set; }        
+    public virtual bool HasStarted => false;
+    
+    public HttpResponseFeature()
+    {
+        StatusCode = 200;
+        Headers = new HeaderDictionary();
+        Body = Stream.Null;
+    }
+                   
+    public virtual void OnStarting(
+        Func<object, Task> callback, 
+        object state)
+    {
+    }
+        
+    public virtual void OnCompleted(
+        Func<object, Task> callback, 
+        object state)
+    {
     }
 }
 
@@ -5032,9 +6202,249 @@ public static class ResponseTrailerExtensions
 
 
 
-##### 2.3.3 response cookie collection
+##### 2.4.4 response body feature
 
-###### 2.3.3.1 接口
+###### 2.4.4.1 接口
+
+```c#
+public interface IHttpResponseBodyFeature
+{    
+    Stream Stream { get; }    
+    PipeWriter Writer { get; }
+            
+    void DisableBuffering();      
+    
+    Task StartAsync(CancellationToken cancellationToken = default);    
+    
+    Task SendFileAsync(
+        string path, 
+        long offset, 
+        long? count, 
+        CancellationToken cancellationToken = default);     
+    
+    Task CompleteAsync();
+}
+
+```
+
+###### 2.4.4.2 stream response body feature
+
+```c#
+public class StreamResponseBodyFeature : IHttpResponseBodyFeature
+{    
+    private bool _started;
+    private bool _completed;
+    private bool _disposed;
+    
+    public Stream Stream { get; }       
+    public IHttpResponseBodyFeature? PriorFeature { get; }
+
+    private PipeWriter? _pipeWriter;    
+    public PipeWriter Writer
+    {
+        get
+        {
+            if (_pipeWriter == null)
+            {
+                _pipeWriter = PipeWriter.Create(
+                    						 Stream, 
+                    						 new StreamPipeWriterOptions(leaveOpen: true));
+                if (_completed)
+                {
+                    _pipeWriter.Complete();
+                }
+            }
+            
+            return _pipeWriter;
+        }
+    }
+        
+    public StreamResponseBodyFeature(Stream stream)
+    {
+        Stream = stream ?? throw new ArgumentNullException(nameof(stream));
+    }
+            
+    public StreamResponseBodyFeature(
+        Stream stream, 
+        IHttpResponseBodyFeature priorFeature)
+    {
+        Stream = stream ?? throw new ArgumentNullException(nameof(stream));
+        PriorFeature = priorFeature;
+    }
+                            
+    public virtual void DisableBuffering()
+    {
+        PriorFeature?.DisableBuffering();
+    }
+           
+    public virtual async Task SendFileAsync(
+        string path, 
+        long offset, 
+        long? count, 
+        CancellationToken cancellationToken)
+    {
+        if (!_started)
+        {
+            await StartAsync(cancellationToken);
+        }
+        await SendFileFallback.SendFileAsync(
+            					   Stream, 
+						           path, 
+						           offset, 
+						           count, 
+						           cancellationToken);
+    }
+    
+    public virtual async Task CompleteAsync()
+    {
+        // CompleteAsync is registered with HttpResponse.OnCompleted and there's no way 
+        // to unregister it.
+        // Prevent it from running by marking as disposed.
+        if (_disposed)
+        {
+            return;
+        }
+        if (_completed)
+        {
+            return;
+        }
+        
+        if (!_started)
+        {
+            await StartAsync();
+        }
+        
+        _completed = true;
+        
+        if (_pipeWriter != null)
+        {
+            await _pipeWriter.CompleteAsync();
+        }
+    }
+    
+    public virtual Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_started)
+        {
+            _started = true;
+            return Stream.FlushAsync(cancellationToken);
+        }
+        return Task.CompletedTask;
+    }
+        
+    /// <summary>
+    /// Prevents CompleteAsync from operating.
+    /// </summary>
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+}
+
+```
+
+###### 2.4.4.3 send file fallback
+
+```c#
+public static class SendFileFallback
+{    
+    public static async Task SendFileAsync(
+        Stream destination, 
+        string filePath, 
+        long offset, 
+        long? count, 
+        CancellationToken cancellationToken)
+    {
+        var fileInfo = new FileInfo(filePath);
+        if (offset < 0 || offset > fileInfo.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(offset), 
+                offset, 
+                string.Empty);
+        }
+        if (count.HasValue &&
+            (count.Value < 0 || count.Value > fileInfo.Length - offset))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count), 
+                count, 
+                string.Empty);
+        }
+        
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        const int bufferSize = 1024 * 16;
+        
+        var fileStream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite,
+            bufferSize: bufferSize,
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+        
+        using (fileStream)
+        {
+            fileStream.Seek(offset, SeekOrigin.Begin);
+            await StreamCopyOperationInternal.CopyToAsync(
+                fileStream, 
+                destination, 
+                count, 
+                bufferSize, 
+                cancellationToken);
+        }
+    }
+}
+
+```
+
+##### 2.4.5 response cookie feature
+
+###### 2.4.5.1 接口
+
+```c#
+public interface IResponseCookiesFeature
+{    
+    IResponseCookies Cookies { get; }
+}
+
+```
+
+###### 2.4.5.2 实现
+
+```c#
+public class ResponseCookiesFeature : IResponseCookiesFeature
+{    
+    private readonly static Func<IFeatureCollection, IHttpResponseFeature?> 
+        nullResponseFeature = f => null;
+    
+    private readonly IFeatureCollection _features;
+    private IResponseCookies? _cookiesCollection;
+    
+    public IResponseCookies Cookies
+    {
+        get
+        {
+            if (_cookiesCollection == null)
+            {
+                _cookiesCollection = new ResponseCookies(_features);
+            }
+            
+            return _cookiesCollection;
+        }
+    }
+    
+    public ResponseCookiesFeature(IFeatureCollection features)
+    {
+        _features = features 
+            ?? throw new ArgumentNullException(nameof(feaures));
+    }        
+}
+
+```
+
+###### 2.4.5.3 response cookies 接口
 
 ```c#
 public interface IResponseCookies
@@ -5048,24 +6458,24 @@ public interface IResponseCookies
 
 ```
 
-###### 2.3.3.2 实现
+###### 2.4.5.4 response cookies 实现
 
 ```c#
 internal class ResponseCookies : IResponseCookies
 {
     internal const string EnableCookieNameEncoding = 
         "Microsoft.AspNetCore.Http.EnableCookieNameEncoding";
+    
     internal bool _enableCookieNameEncoding = 
         AppContext.TryGetSwitch(
-        	EnableCookieNameEncoding, 
-        	out var enabled) && 
+        			   EnableCookieNameEncoding, 
+		         	   out var enabled) && 
         enabled;
 
-    private readonly IFeatureCollection _features;
     private ILogger? _logger;
+    private readonly IFeatureCollection _features;    
     private IHeaderDictionary Headers { get; set; }
-    
-        
+            
     internal ResponseCookies(IFeatureCollection features)
     {
         _features = features;
@@ -5073,31 +6483,26 @@ internal class ResponseCookies : IResponseCookies
     }
     
             
-    public void Append(
-        string key, 
-        string value)
+    public void Append(string key, string value)
     {
-        var setCookieHeaderValue = new SetCookieHeaderValue(
-            _enableCookieNameEncoding 
-            	? Uri.EscapeDataString(key) 
-            	: key,
-            Uri.EscapeDataString(value))
+        var setCookieHeaderValue = 
+            new SetCookieHeaderValue(
+            		_enableCookieNameEncoding 
+            			? Uri.EscapeDataString(key)             	
+            			: key,
+            		Uri.EscapeDataString(value))
         {
             Path = "/"
         };
         
         var cookieValue = setCookieHeaderValue.ToString();
         
-        Headers[HeaderNames.SetCookie] = 
-            StringValues.Concat(
-            	Headers[HeaderNames.SetCookie], 
-            	cookieValue);
+        Headers[HeaderNames.SetCookie] = StringValues.Concat(
+										            	  Headers[HeaderNames.SetCookie], 
+										            	  cookieValue);
     }
         
-    public void Append(
-        string key, 
-        string value, 
-        CookieOptions options)
+    public void Append(string key, string value, CookieOptions options)
     {
         if (options == null)
         {
@@ -5105,13 +6510,13 @@ internal class ResponseCookies : IResponseCookies
         }
         
         // SameSite=None cookies must be marked as Secure.
-        if (!options.Secure && options.SameSite == SameSiteMode.None)
+        if (!options.Secure && 
+            options.SameSite == SameSiteMode.None)
         {
             if (_logger == null)
             {
-                var services = _features
-                    .Get<Features.IServiceProvidersFeature>()
-                    ?.RequestServices;
+                var services = _features.Get<Features.IServiceProvidersFeature>()
+					                    ?.RequestServices;
                 _logger = services?.GetService<ILogger<ResponseCookies>>();
             }
             
@@ -5121,11 +6526,12 @@ internal class ResponseCookies : IResponseCookies
             }
         }
         
-        var setCookieHeaderValue = new SetCookieHeaderValue(
-            _enableCookieNameEncoding 
-            	? Uri.EscapeDataString(key) 
-            	: key,
-            Uri.EscapeDataString(value))
+        var setCookieHeaderValue =
+            new SetCookieHeaderValue(
+            		_enableCookieNameEncoding 
+		            	? Uri.EscapeDataString(key) 
+        		    	: key,
+		            Uri.EscapeDataString(value))
         {
             Domain = options.Domain,
             Path = options.Path,
@@ -5140,8 +6546,8 @@ internal class ResponseCookies : IResponseCookies
         
         Headers[HeaderNames.SetCookie] = 
             StringValues.Concat(
-            	Headers[HeaderNames.SetCookie], 
-            	cookieValue);
+            				 Headers[HeaderNames.SetCookie], 
+			            	 cookieValue);
     }
     
     /// <inheritdoc />
@@ -5172,28 +6578,28 @@ internal class ResponseCookies : IResponseCookies
         {
             rejectPredicate = (value, encKeyPlusEquals, opts) =>
                 value.StartsWith(
-                	encKeyPlusEquals, 
-                	StringComparison.OrdinalIgnoreCase) &&
+                		  encKeyPlusEquals, 
+                		  StringComparison.OrdinalIgnoreCase) &&
                 value.IndexOf(
-                	$"domain={opts.Domain}", 
-                	StringComparison.OrdinalIgnoreCase) != -1;
+                		  $"domain={opts.Domain}", 
+                		  StringComparison.OrdinalIgnoreCase) != -1;
         }
         else if (pathHasValue)
         {
             rejectPredicate = (value, encKeyPlusEquals, opts) =>
                 value.StartsWith(
-                	encKeyPlusEquals, 
-                	StringComparison.OrdinalIgnoreCase) &&
+                		  encKeyPlusEquals, 
+                		  StringComparison.OrdinalIgnoreCase) &&
                 value.IndexOf(
-                	$"path={opts.Path}", 
-                	StringComparison.OrdinalIgnoreCase) != -1;
+                		  $"path={opts.Path}", 
+                		  StringComparison.OrdinalIgnoreCase) != -1;
         }
         else
         {
             rejectPredicate = (value, encKeyPlusEquals, opts) => 
                 value.StartsWith(
-                	encKeyPlusEquals, 
-                	StringComparison.OrdinalIgnoreCase);
+                		  encKeyPlusEquals, 
+                		  StringComparison.OrdinalIgnoreCase);
         }
         
         var existingValues = Headers[HeaderNames.SetCookie];
@@ -5205,9 +6611,9 @@ internal class ResponseCookies : IResponseCookies
             for (var i = 0; i < values.Length; i++)
             {
                 if (!rejectPredicate(
-                    values[i], 
-                    encodedKeyPlusEquals, 
-                    options))
+                    	values[i], 
+                    	encodedKeyPlusEquals, 
+                    	options))
                 {
                     newValues.Add(values[i]);
                 }
@@ -5249,7 +6655,7 @@ internal class ResponseCookies : IResponseCookies
 
 ```
 
-###### 2.3.3.3 cookie options
+###### 2.4.5.5 cookie options
 
 ```c#
 public class CookieOptions
@@ -5271,9 +6677,9 @@ public class CookieOptions
 
 ```
 
-#### 2.4 connection info
+#### 2.5 connection info
 
-##### 2.4.1 抽象基类
+##### 2.5.1 抽象基类
 
 ```c#
 public abstract class ConnectionInfo
@@ -5298,17 +6704,17 @@ public abstract class ConnectionInfo
 
 ```
 
-##### 2.4.2 默认实现
+##### 2.4.2 default connection info
 
 ```c#
 internal sealed class DefaultConnectionInfo : ConnectionInfo
-{            
-    private FeatureReferences<FeatureInterfaces> _features;
+{                
     struct FeatureInterfaces
     {
         public IHttpConnectionFeature? Connection;
         public ITlsConnectionFeature? TlsConnection;
     }
+    private FeatureReferences<FeatureInterfaces> _features;
     
     public DefaultConnectionInfo(IFeatureCollection features)
     {
@@ -5335,7 +6741,7 @@ internal sealed class DefaultConnectionInfo : ConnectionInfo
         CancellationToken cancellationToken = default)
     {
         return TlsConnectionFeature
-            .GetClientCertificateAsync(cancellationToken);
+            	   .GetClientCertificateAsync(cancellationToken);
     }        
 }
 
@@ -5346,36 +6752,60 @@ internal sealed class DefaultConnectionInfo : ConnectionInfo
 ```c#
 internal sealed class DefaultConnectionInfo : ConnectionInfo
 {
+    /* http connection feature with default */
+    private IHttpConnectionFeature HttpConnectionFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Connection, 
+        			  _newHttpConnectionFeature)!;
+    
+    private readonly static Func<IFeatureCollection, IHttpConnectionFeature> 
+        _newHttpConnectionFeature = f => new HttpConnectionFeature();
+    
+    // 从 http connection feature 解析 connection id
     public override string Id
     {
         get { return HttpConnectionFeature.ConnectionId; }
         set { HttpConnectionFeature.ConnectionId = value; }
     }
     
+    // 从 http connection feature 解析 remote ip address
     public override IPAddress? RemoteIpAddress
     {
         get { return HttpConnectionFeature.RemoteIpAddress; }
         set { HttpConnectionFeature.RemoteIpAddress = value; }
     }
     
+    // 从 http connection feature 解析 remote port
     public override int RemotePort
     {
         get { return HttpConnectionFeature.RemotePort; }
         set { HttpConnectionFeature.RemotePort = value; }
     }
     
+    // 从 http connection feature 解析 local ip address
     public override IPAddress? LocalIpAddress
     {
         get { return HttpConnectionFeature.LocalIpAddress; }
         set { HttpConnectionFeature.LocalIpAddress = value; }
     }
     
+    // 从 http connection feature 解析 local port
     public override int LocalPort
     {
         get { return HttpConnectionFeature.LocalPort; }
         set { HttpConnectionFeature.LocalPort = value; }
     }
     
+    /* tls connection feature with default */    
+    private ITlsConnectionFeature TlsConnectionFeature=>
+        _features.Fetch(
+			         ref _features.Cache.TlsConnection, 
+			         _newTlsConnectionFeature)!;        
+        
+    private readonly static Func<IFeatureCollection, ITlsConnectionFeature> 
+        _newTlsConnectionFeature = f => new TlsConnectionFeature();
+    
+    // 从 tls connection feature 解析 client certificate
     public override X509Certificate2? ClientCertificate
     {
         get { return TlsConnectionFeature.ClientCertificate; }
@@ -5385,31 +6815,74 @@ internal sealed class DefaultConnectionInfo : ConnectionInfo
 
 ```
 
-###### 2.4.2.2 features
+##### 2.5.3 http connection feature
+
+###### 2.5.3.1 接口
 
 ```c#
-internal sealed class DefaultConnectionInfo : ConnectionInfo
-{
-    // features
-    private IHttpConnectionFeature HttpConnectionFeature =>
-        _features.Fetch(ref _features.Cache.Connection, _newHttpConnectionFeature)!;
+public interface IHttpConnectionFeature
+{    
+    string ConnectionId { get; set; }
+        
+    IPAddress? RemoteIpAddress { get; set; }
+    int RemotePort { get; set; }
     
-    private ITlsConnectionFeature TlsConnectionFeature=>
-        _features.Fetch(ref _features.Cache.TlsConnection, _newTlsConnectionFeature)!;
-    
-    // default
-    private readonly static Func<IFeatureCollection, IHttpConnectionFeature> 
-        _newHttpConnectionFeature = f => new HttpConnectionFeature();
-    
-    private readonly static Func<IFeatureCollection, ITlsConnectionFeature> 
-        _newTlsConnectionFeature = f => new TlsConnectionFeature();
+    IPAddress? LocalIpAddress { get; set; }                   
+    int LocalPort { get; set; }
 }
 
 ```
 
-#### 2.5 web socket manager
+###### 2.5.3.2 实现
 
-##### 2.5.1 抽象基类
+```c#
+public class HttpConnectionFeature : IHttpConnectionFeature
+{    
+    public string ConnectionId { get; set; } = default!;        
+
+    public IPAddress? LocalIpAddress { get; set; }        
+    public int LocalPort { get; set; }
+        
+    public IPAddress? RemoteIpAddress { get; set; }    
+    public int RemotePort { get; set; }
+}
+
+```
+
+##### 2.5.4 tls connection feature
+
+###### 2.5.4.1 接口
+
+```c#
+public interface ITlsConnectionFeature
+{    
+    X509Certificate2? ClientCertificate { get; set; }        
+    Task<X509Certificate2?> GetClientCertificateAsync(CancellationToken cancellationToken);
+}
+
+```
+
+###### 2.5.4.2 实现
+
+```c#
+public class TlsConnectionFeature : ITlsConnectionFeature
+{
+    /// <inheritdoc />
+    public X509Certificate2? ClientCertificate { get; set; }
+    
+    /// <inheritdoc />
+    public Task<X509Certificate2?> GetClientCertificateAsync(
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(ClientCertificate);
+    }
+}
+
+```
+
+#### 2.6 web socket manager
+
+##### 2.6.1 抽象基类
 
 ```c#
 public abstract class WebSocketManager
@@ -5428,19 +6901,18 @@ public abstract class WebSocketManager
 
 ```
 
-##### 2.5.2 默认实现
+##### 2.6.2 default web socket manager
 
 ```c#
 internal sealed class DefaultWebSocketManager : WebSocketManager
 {            
-    private FeatureReferences<FeatureInterfaces> _features;
     struct FeatureInterfaces
     {
         public IHttpRequestFeature? Request;
         public IHttpWebSocketFeature? WebSockets;
     }
-    
-    /* 构造函数 */
+    private FeatureReferences<FeatureInterfaces> _features;
+            
     public DefaultWebSocketManager(IFeatureCollection features)
     {
         Initialize(features);
@@ -5470,21 +6942,31 @@ internal sealed class DefaultWebSocketManager : WebSocketManager
             throw new NotSupportedException("WebSockets are not supported");
         }
         
-        return WebSocketFeature
-            .AcceptAsync(new WebSocketAcceptContext() 
-            	{ 
-                    SubProtocol = subProtocol 
-                });
+        return WebSocketFeature.AcceptAsync(
+            						new WebSocketAcceptContext() 
+            						{                     
+                                        SubProtocol = subProtocol 
+                                    });
     }        
 }
 
 ```
 
-###### 2.5.2.1 公共属性
+###### 2.6.2.1 公共属性
 
 ```c#
 internal sealed class DefaultWebSocketManager : WebSocketManager
 {
+    /* http web socket feature with default (null) */
+    private IHttpWebSocketFeature WebSocketFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.WebSockets, 
+        			  _nullWebSocketFeature)!;
+                
+    private readonly static Func<IFeatureCollection, IHttpWebSocketFeature?> 
+        _nullWebSocketFeature = f => null;
+    
+    // 从 web socket feature 解析 is web socket request
     public override bool IsWebSocketRequest
     {
         get
@@ -5493,44 +6975,30 @@ internal sealed class DefaultWebSocketManager : WebSocketManager
                    WebSocketFeature.IsWebSocketRequest;
         }
     }
+        
+    /* http request feature with default (null) */
+    private IHttpRequestFeature HttpRequestFeature =>
+        _features.Fetch(
+        			  ref _features.Cache.Request, 
+        			  _nullRequestFeature)!;
     
+    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
+        _nullRequestFeature = f => null;
+    
+    // 从 http request feature 解析 web socket request protocols
     public override IList<string> WebSocketRequestedProtocols
     {
         get
         {
-            return HttpRequestFeature
-                .Headers
-                .GetCommaSeparatedValues(
-                	HeaderNames.WebSocketSubProtocols);
+            return HttpRequestFeature.Headers
+                					 .GetCommaSeparatedValues(Names.WebSocketSubProtocols);
         }
     }
 }
 
 ```
 
-###### 2.5.2.2 features
-
-```c#
-internal sealed class DefaultWebSocketManager : WebSocketManager
-{
-    // features
-    private IHttpRequestFeature HttpRequestFeature =>
-        _features.Fetch(ref _features.Cache.Request, _nullRequestFeature)!;
-    
-    private IHttpWebSocketFeature WebSocketFeature =>
-        _features.Fetch(ref _features.Cache.WebSockets, _nullWebSocketFeature)!;
-    
-    // default
-    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
-        _nullRequestFeature = f => null;
-    
-    private readonly static Func<IFeatureCollection, IHttpWebSocketFeature?> 
-        _nullWebSocketFeature = f => null;
-}
-
-```
-
-##### 2.5.3 web socket accept context
+###### 2.6.2.2 web socket accept context
 
 ```c#
 public class WebSocketAcceptContext
@@ -5540,9 +7008,22 @@ public class WebSocketAcceptContext
 
 ```
 
-#### 2.6 session
+##### 2.6.3 http web socket feature
 
-##### 2.6.1 接口
+###### 2.6.3.1 接口
+
+```c#
+public interface IHttpWebSocketFeature
+{    
+    bool IsWebSocketRequest { get; }        
+    Task<WebSocket> AcceptAsync(WebSocketAcceptContext context);
+}
+
+```
+
+#### 2.7 session
+
+##### 2.7.1 接口
 
 ```c#
 public interface ISession
@@ -5561,7 +7042,7 @@ public interface ISession
 
 ```
 
-##### 2.6.2 扩展
+##### 2.7.2 扩展
 
 ```c#
 public static class SessionExtensions
@@ -5624,457 +7105,7 @@ public static class SessionExtensions
 
 ```
 
-#### 2.7 about feature
 
-* 实现某种特定功能的接口
-
-##### 2.7.1 feature collection
-
-###### 2.7.1.1 接口
-
-```c#
-public interface IFeatureCollection : 
-	IEnumerable<KeyValuePair<Type, object>>
-{    
-    bool IsReadOnly { get; }        
-    int Revision { get; }        
-    object? this[Type key] { get; set; }
-        
-    TFeature? Get<TFeature>();        
-    void Set<TFeature>(TFeature? instance);
-}
-
-```
-
-###### 2.7.1.2 实现
-
-```c#
-public class FeatureCollection : IFeatureCollection
-{
-    private static readonly KeyComparer 
-        FeatureKeyComparer = new KeyComparer();
-    
-    private readonly IFeatureCollection? _defaults;
-    private IDictionary<Type, object>? _features;
-    private volatile int _containerRevision;
-    
-    /* 实现接口属性 */
-    
-    public bool IsReadOnly 
-    { 
-        get 
-        { 
-            return false; 
-        } 
-    }
-    
-    public virtual int Revision
-    {
-        get 
-        { 
-            return _containerRevision + (_defaults?.Revision ?? 0); 
-        }
-    }
-    
-    public object? this[Type key]
-    {
-        get
-        {
-            if (key == null)
-            {
-                throw new ArgumentNullException(nameof(key));
-            }
-            
-            return _features != null && 
-                   _features.TryGetValue(key, out var result) 
-                       ? result 
-                	   : _defaults?[key];
-        }
-        set
-        {
-            if (key == null)
-            {
-                throw new ArgumentNullException(nameof(key));
-            }
-            
-            if (value == null)
-            {
-                if (_features != null && _features.Remove(key))
-                {
-                    _containerRevision++;
-                }
-                return;
-            }
-            
-            if (_features == null)
-            {
-                _features = new Dictionary<Type, object>();
-            }
-            
-            _features[key] = value;
-            _containerRevision++;
-        }
-    }
-    
-    /* 构造函数 */
-    
-    public FeatureCollection()
-    {
-    }
-        
-    public FeatureCollection(IFeatureCollection defaults)
-    {
-        _defaults = defaults;
-    }
-                                    
-    /* 迭代器 */
-    
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
-        
-    public IEnumerator<KeyValuePair<Type, object>> GetEnumerator()
-    {
-        if (_features != null)
-        {
-            foreach (var pair in _features)
-            {
-                yield return pair;
-            }
-        }
-        
-        if (_defaults != null)
-        {
-            // Don't return features masked by the wrapper.
-            foreach (var pair in _features == null 
-                     	? _defaults 
-                     	: _defaults.Except(
-                            _features, 
-                            FeatureKeyComparer))
-            {
-                yield return pair;
-            }
-        }
-    }
-    
-    /* 方法 */
-    public TFeature? Get<TFeature>()
-    {
-        return (TFeature?)this[typeof(TFeature)];
-    }
-        
-    public void Set<TFeature>(TFeature? instance)
-    {
-        this[typeof(TFeature)] = instance;
-    }
-    
-    // 比较器
-    private class KeyComparer : IEqualityComparer<KeyValuePair<Type, object>>
-    {
-        public bool Equals(
-            KeyValuePair<Type, object> x, 
-            KeyValuePair<Type, object> y)
-        {
-            return x.Key.Equals(y.Key);
-        }
-        
-        public int GetHashCode(
-            KeyValuePair<Type, object> obj)
-        {
-            return obj.Key.GetHashCode();
-        }
-    }
-}
-
-```
-
-##### 2.7.2 feature reference
-
-###### 2.7.2.1 reference
-
-```c#
-public struct FeatureReference<T>
-{
-    public static readonly FeatureReference<T> Default = 
-        new FeatureReference<T>(default(T), -1);
-    
-    private T? _feature;
-    private int _revision;
-    
-    private FeatureReference(T? feature, int revision)
-    {
-        _feature = feature;
-        _revision = revision;
-    }                
-    
-    public T? Fetch(IFeatureCollection features)
-    {
-        if (_revision == features.Revision)
-        {
-            return _feature;
-        }
-        _feature = (T?)features[typeof(T)];
-        _revision = features.Revision;
-        return _feature;
-    }
-        
-    public T Update(
-        IFeatureCollection features, 
-        T feature)
-    {
-        features[typeof(T)] = feature;
-        _feature = feature;
-        _revision = features.Revision;
-        return feature;
-    }
-}
-
-```
-
-###### 2.7.2.2 references
-
-```c#
-public struct FeatureReferences<TCache>
-{
-    public IFeatureCollection Collection { get; private set; }
-    
-    public TCache? Cache;
-    public int Revision { get; private set; }
-    
-    // 构造函数
-    public FeatureReferences(IFeatureCollection collection)
-    {
-        Collection = collection;
-        Cache = default;
-        Revision = collection.Revision;
-    }
-    
-    /* 初始化 */
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Initalize(IFeatureCollection collection)
-    {
-        Revision = collection.Revision;
-        Collection = collection;
-    }
-        
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Initalize(IFeatureCollection collection, int revision)
-    {
-        Revision = revision;
-        Collection = collection;
-    }
-    
-    /* fetch */
-    
-    /// <summary>
-    /// This API is part of ASP.NET Core's infrastructure and 
-    //  should not be referenced by application code.
-    /// </summary>
-    public TFeature? Fetch<TFeature>(
-        ref TFeature? cached, 
-        Func<IFeatureCollection, 
-        TFeature?> factory)
-        	where TFeature : class? => Fetch(ref cached, Collection, factory);
-        
-    // Careful with modifications to the Fetch method; 
-    // it is carefully constructed for inlining
-    // See: https://github.com/aspnet/HttpAbstractions/pull/704
-    // This method is 59 IL bytes and at inline call depth 3 from accessing a property.
-    // This combination is enough for the jit to consider it an "unprofitable inline"
-    // Aggressively inlining it causes the entire call chain to dissolve:
-    //
-    // This means this call graph:
-    //
-    // HttpResponse.Headers 
-    // 	-> Response.HttpResponseFeature 
-    // 	-> Fetch -> Fetch      
-    //	-> Revision
-    //  -> Collection -> Collection
-    //  -> Collection.Revision
-    //
-    // Has 6 calls eliminated and becomes just:                                    
-    // 	-> UpdateCached
-    //
-    // HttpResponse.Headers 
-    //	-> Collection.Revision
-    //  -> UpdateCached (not called on fast path)
-    //
-    // As this is inlined at the callsite we want to keep the method small, 
-    // so it only detects if a reset or update is required and 
-    // all the reset and update logic is pushed to UpdateCached.
-    //
-    // Generally Fetch is called at a ratio > x4 of UpdateCached so this is a large gain
-    
-    /// <summary>
-    /// This API is part of ASP.NET Core's infrastructure and 
-    /// should not be referenced by application code.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TFeature? Fetch<TFeature, TState>(        
-        ref TFeature? cached,
-        TState state,
-        Func<TState, TFeature?> factory) where TFeature : class?
-    {
-        var flush = false;
-        var revision = Collection?.Revision ?? ContextDisposed();
-        if (Revision != revision)
-        {
-            // Clear cached value to force call to UpdateCached
-            cached = null!;
-            // Collection changed, clear whole feature cache
-            flush = true;
-        }
-        
-        return cached ?? UpdateCached(
-            ref cached!, 
-            state, 
-            factory, 
-            revision, 
-            flush);
-    }
-    
-    // Update and cache clearing logic, when the fast-path in Fetch isn't applicable
-    private TFeature? UpdateCached<TFeature, TState>(
-        ref TFeature? cached, 
-        TState state, 
-        Func<TState, TFeature?> factory, 
-        int revision, bool flush) 
-        	where TFeature : class?
-    {
-        if (flush)
-        {
-            // Collection detected as changed, clear cache
-            Cache = default;
-        }
-        
-        cached = Collection.Get<TFeature>();
-        if (cached == null)
-        {
-            // Item not in collection, create it with factory
-            cached = factory(state);
-            // Add item to IFeatureCollection
-            Collection.Set(cached);
-            // Revision changed by .Set, update revision to new value
-            Revision = Collection.Revision;
-        }
-        else if (flush)
-        {
-            // Cache was cleared, but item retrieved from current Collection for version
-            // so use passed in revision rather than making another virtual call
-            Revision = revision;
-        }
-        
-        return cached;
-    }        
-    
-    private static int ContextDisposed()
-    {
-        ThrowContextDisposed();
-        return 0;
-    }
-    
-    private static void ThrowContextDisposed()
-    {
-        throw new ObjectDisposedException(
-            nameof(Collection), 
-            nameof(IFeatureCollection) + " has been disposed.");
-    }
-}
-
-```
-
-#### 2.8 创建 http context
-
-##### 2.8.1 http context factory
-
-```c#
-public interface IHttpContextFactory
-{    
-    HttpContext Create(IFeatureCollection featureCollection);        
-    void Dispose(HttpContext httpContext);
-}
-
-```
-
-##### 2.8.2 http context accessor
-
-###### 2.8.2.1 接口
-
-```c#
-public interface IHttpContextAccessor
-{        
-    HttpContext? HttpContext { get; set; }
-}
-
-```
-
-###### 2.8.2.2 实现
-
-```c#
-public class HttpContextAccessor : IHttpContextAccessor
-{
-    private static AsyncLocal<HttpContextHolder> 
-        _httpContextCurrent = new AsyncLocal<HttpContextHolder>();
-    
-    /// <inheritdoc/>
-    public HttpContext? HttpContext
-    {
-        get
-        {
-            return  _httpContextCurrent.Value?.Context;
-        }
-        set
-        {
-            var holder = _httpContextCurrent.Value;
-            if (holder != null)
-            {
-                // Clear current HttpContext trapped in the AsyncLocals, as its done.
-                holder.Context = null;
-            }
-            
-            if (value != null)
-            {
-                // Use an object indirection to hold the HttpContext in the AsyncLocal,
-                // so it can be cleared in all ExecutionContexts when its cleared.
-                _httpContextCurrent.Value = new HttpContextHolder 
-                { 
-                    Context = value 
-                };
-            }
-        }
-    }
-    
-    private class HttpContextHolder
-    {
-        public HttpContext? Context;
-    }
-}
-
-
-
-```
-
-###### 2.8.2.3 service collection 扩展方法
-
-```c#
-public static class HttpServiceCollectionExtensions
-{    
-    public static IServiceCollection AddHttpContextAccessor(
-        this IServiceCollection services)
-    {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-        
-        services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-        return services;
-    }
-}
-
-```
 
 #### 2.9 various features
 
@@ -6082,131 +7113,9 @@ public static class HttpServiceCollectionExtensions
 
 ##### 2.9.2 request
 
-###### 2.9.2.1 request feature
 
-* 接口
 
-```c#
-public interface IHttpRequestFeature
-{    
-    string Protocol { get; set; }                
-    string Scheme { get; set; }        
-    string Method { get; set; }        
-    string PathBase { get; set; }        
-    string Path { get; set; }                
-    string QueryString { get; set; }        
-    string RawTarget { get; set; }        
-    IHeaderDictionary Headers { get; set; }        
-    Stream Body { get; set; }
-}
 
-```
-
-* 实现
-
-```c#
-public class HttpRequestFeature : IHttpRequestFeature
-{    
-    public string Protocol { get; set; }        
-    public string Scheme { get; set; }        
-    public string Method { get; set; }        
-    public string PathBase { get; set; }        
-    public string Path { get; set; }        
-    public string QueryString { get; set; }        
-    public string RawTarget { get; set; }        
-    public IHeaderDictionary Headers { get; set; }        
-    public Stream Body { get; set; }
-    
-    public HttpRequestFeature()                
-    {
-        Headers = new HeaderDictionary();
-        Body = Stream.Null;
-        Protocol = string.Empty;
-        Scheme = string.Empty;
-        Method = string.Empty;
-        PathBase = string.Empty;
-        Path = string.Empty;
-        QueryString = string.Empty;
-        RawTarget = string.Empty;
-    }            
-}
-
-```
-
-###### 2.9.2.2 request identifier feature
-
-* 接口
-
-```c#
-public interface IHttpRequestIdentifierFeature
-{    
-    string TraceIdentifier { get; set; }
-}
-
-```
-
-* 实现
-
-```c#
-public class HttpRequestIdentifierFeature : IHttpRequestIdentifierFeature
-{
-    // Base32 encoding - in ascii sort order for easy text based sorting
-    private static readonly char[] s_encode32Chars = 
-        "0123456789ABCDEFGHIJKLMNOPQRSTUV".ToCharArray();
-    
-    // Seed the _requestId for this application instance with
-    // the number of 100-nanosecond intervals that 
-    // have elapsed since 12:00:00 midnight, January 1, 0001
-    // for a roughly increasing _requestId over restarts
-    private static long _requestId = DateTime.UtcNow.Ticks;
-    
-    private string? _id = null;
-        
-    public string TraceIdentifier
-    {
-        get
-        {
-            // Don't incur the cost of generating the request ID until it's asked for
-            if (_id == null)
-            {
-                _id = GenerateRequestId(
-                    Interlocked.Increment(ref _requestId));
-            }
-            return _id;
-        }
-        set
-        {
-            _id = value;
-        }
-    }
-    
-    private static string GenerateRequestId(long id)
-    {
-        return string.Create(
-            13, 
-            id, 
-            (buffer, value) =>
-            {
-                char[] encode32Chars = s_encode32Chars;
-                
-                buffer[12] = encode32Chars[value & 31];
-                buffer[11] = encode32Chars[(value >> 5) & 31];
-                buffer[10] = encode32Chars[(value >> 10) & 31];
-                buffer[9] = encode32Chars[(value >> 15) & 31];
-                buffer[8] = encode32Chars[(value >> 20) & 31];
-                buffer[7] = encode32Chars[(value >> 25) & 31];
-                buffer[6] = encode32Chars[(value >> 30) & 31];
-                buffer[5] = encode32Chars[(value >> 35) & 31];
-                buffer[4] = encode32Chars[(value >> 40) & 31];
-                buffer[3] = encode32Chars[(value >> 45) & 31];
-                buffer[2] = encode32Chars[(value >> 50) & 31];
-                buffer[1] = encode32Chars[(value >> 55) & 31];
-                buffer[0] = encode32Chars[(value >> 60) & 31];
-            });
-    }
-}
-
-```
 
 ###### 2.9.2.3 request trailer feature
 
@@ -6219,253 +7128,19 @@ public interface IHttpRequestTrailersFeature
 
 ```
 
-###### 2.9.2.4 query feature
-
-* 接口
-
-```c#
-public interface IQueryFeature
-{    
-    IQueryCollection Query { get; set; }
-}
-
-```
-
-* 实现
-
-```c#
-public class QueryFeature : IQueryFeature
-{
-    
-    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
-        _nullRequestFeature = f => null;
-    
-    private FeatureReferences<IHttpRequestFeature> _features;
-     private IHttpRequestFeature HttpRequestFeature =>
-        _features.Fetch(ref _features.Cache, _nullRequestFeature)!;    
-    private string? _original;
-    private IQueryCollection? _parsedValues;
-    
-    /* 构造函数*/
-    
-    public QueryFeature(IQueryCollection query)
-    {
-        if (query == null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
-        
-        _parsedValues = query;
-    }
-        
-    public QueryFeature(IFeatureCollection features)
-    {
-        if (features == null)
-        {
-            throw new ArgumentNullException(nameof(features));
-        }
-        
-        _features.Initalize(features);
-    }
-    
-   	/* 方法 */
-       
-    public IQueryCollection Query
-    {
-        get
-        {
-            if (_features.Collection == null)
-            {
-                if (_parsedValues == null)
-                {
-                    _parsedValues = QueryCollection.Empty;
-                }
-                return _parsedValues;
-            }
-            
-            var current = HttpRequestFeature.QueryString;
-            if (_parsedValues == null || 
-                !string.Equals(
-                    _original, 
-                    current, 
-                    StringComparison.Ordinal))
-            {
-                _original = current;
-                
-                var result = QueryHelpers.ParseNullableQuery(current);
-                
-                if (result == null)
-                {
-                    _parsedValues = QueryCollection.Empty;
-                }
-                else
-                {
-                    _parsedValues = new QueryCollection(result);
-                }
-            }
-            return _parsedValues;
-        }
-        set
-        {
-            _parsedValues = value;
-            if (_features.Collection != null)
-            {
-                if (value == null)
-                {
-                    _original = string.Empty;
-                    HttpRequestFeature.QueryString = string.Empty;
-                }
-                else
-                {
-                    _original = QueryString.Create(_parsedValues).ToString();
-                    HttpRequestFeature.QueryString = _original;
-                }
-            }
-        }
-    }
-}
-
-```
 
 
 
-###### 2.9.2.5 request cookie feature
-
-* 接口
-
-```c#
-public interface IRequestCookiesFeature
-{    
-    IRequestCookieCollection Cookies { get; set; }
-}
-
-```
-
-* 实现
-
-```c#
-public class RequestCookiesFeature : IRequestCookiesFeature
-{    
-    private readonly static Func<IFeatureCollection, IHttpRequestFeature?> 
-        _nullRequestFeature = f => null;
-    
-    private FeatureReferences<IHttpRequestFeature> _features;
-    private IHttpRequestFeature HttpRequestFeature =>
-        _features.Fetch(ref _features.Cache, _nullRequestFeature)!;
-    
-    private StringValues _original;
-    private IRequestCookieCollection? _parsedValues;
-    
-    public IRequestCookieCollection Cookies
-    {
-        get
-        {
-            if (_features.Collection == null)
-            {
-                if (_parsedValues == null)
-                {
-                    _parsedValues = RequestCookieCollection.Empty;
-                }
-                return _parsedValues;
-            }
-            
-            var headers = HttpRequestFeature.Headers;
-            StringValues current;
-            if (!headers.TryGetValue(HeaderNames.Cookie, out current))
-            {
-                current = string.Empty;
-            }
-            
-            if (_parsedValues == null || _original != current)
-            {
-                _original = current;
-                _parsedValues = RequestCookieCollection.Parse(current.ToArray());
-            }
-            
-            return _parsedValues;
-        }
-        set
-        {
-            _parsedValues = value;
-            _original = StringValues.Empty;
-            if (_features.Collection != null)
-            {
-                if (_parsedValues == null || _parsedValues.Count == 0)
-                {
-                    HttpRequestFeature
-                        .Headers
-                        .Remove(HeaderNames.Cookie);
-                }
-                else
-                {
-                    var headers = new List<string>(_parsedValues.Count);
-                    foreach (var pair in _parsedValues)
-                    {
-                        headers.Add(
-                            new CookieHeaderValue(pair.Key, pair.Value).ToString());
-                    }
-                    _original = headers.ToArray();
-                    HttpRequestFeature.Headers[HeaderNames.Cookie] = _original;
-                }
-            }
-        }
-    }
-    
-    /* 构造函数 */
-    
-    public RequestCookiesFeature(IRequestCookieCollection cookies)
-    {
-        if (cookies == null)
-        {
-            throw new ArgumentNullException(nameof(cookies));
-        }
-        
-        _parsedValues = cookies;
-    }
-            
-    public RequestCookiesFeature(IFeatureCollection features)
-    {
-        if (features == null)
-        {
-            throw new ArgumentNullException(nameof(features));
-        }
-        
-        features.Initalize(features);
-        
-    }                        
-}
-
-```
 
 
 
-###### 2.9.2.6 request lifetime feature
 
-* 接口
 
-```c#
-public interface IHttpRequestLifetimeFeature
-{    
-    CancellationToken RequestAborted { get; set; }
-        
-    void Abort();
-}
 
-```
 
-* 实现
 
-```c#
-public class HttpRequestLifetimeFeature : IHttpRequestLifetimeFeature
-{    
-    public CancellationToken RequestAborted { get; set; }
-    
-    public void Abort()
-    {
-    }
-}
 
-```
+
 
 ###### 2.9.2.7 request body detect feature
 
@@ -6481,515 +7156,9 @@ public interface IHttpRequestBodyDetectionFeature
 
 
 
-###### 2.9.2.9 request body pipe feature
 
-* 接口
 
-```c#
-public interface IRequestBodyPipeFeature
-{    
-    PipeReader Reader { get; }
-}
 
-```
-
-* 实现
-
-```c#
-public class RequestBodyPipeFeature : IRequestBodyPipeFeature
-{
-    private PipeReader? _internalPipeReader;
-    private Stream? _streamInstanceWhenWrapped;
-    private HttpContext _context;
-    
-    public PipeReader Reader
-    {
-        get
-        {
-            if (_internalPipeReader == null ||
-                !ReferenceEquals(
-                    _streamInstanceWhenWrapped, 
-                    _context.Request.Body))
-            {
-                _streamInstanceWhenWrapped = _context.Request.Body;
-                _internalPipeReader = PipeReader.Create(_context.Request.Body);
-                
-                _context.Response.OnCompleted(
-                    self =>
-                    {
-                        ((PipeReader)self).Complete();
-                        return Task.CompletedTask;
-                    },
-                    _internalPipeReader);
-            }
-            
-            return _internalPipeReader;
-        }
-    }
-    
-    public RequestBodyPipeFeature(HttpContext context)
-    {
-        if (context == null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
-        _context = context;
-    }    
-}
-
-```
-
-###### 2.9.2.10 form feature
-
-* 接口
-
-```c#
-public interface IFormFeature
-{    
-    bool HasFormContentType { get; }        
-    IFormCollection? Form { get; set; }
-        
-    IFormCollection ReadForm();        
-    Task<IFormCollection> ReadFormAsync(CancellationToken cancellationToken);
-}
-
-```
-
-* 实现
-
-```c#
-public class FormFeature : IFormFeature
-{
-    private readonly HttpRequest _request;
-    private readonly FormOptions _options;
-    private Task<IFormCollection>? _parsedFormTask;        
-    private IFormCollection? _form;    
-    
-    private MediaTypeHeaderValue? ContentType
-    {
-        get
-        {
-            MediaTypeHeaderValue.TryParse(_request.ContentType, out var mt);
-            return mt;
-        }
-    }
-    
-    public bool HasFormContentType
-    {
-        get
-        {
-            // Set directly
-            if (Form != null)
-            {
-                return true;
-            }
-            
-            var contentType = ContentType;
-            return HasApplicationFormContentType(contentType) || 
-                   HasMultipartFormContentType(contentType);
-        }
-    }
-            
-    public IFormCollection? Form
-    {
-        get { return _form; }
-        set
-        {
-            _parsedFormTask = null;
-            _form = value;
-        }
-    }
-    
-    /* 构造函数 */
-                    
-    public FormFeature(IFormCollection form)
-    {
-        if (form == null)
-        {
-            throw new ArgumentNullException(nameof(form));
-        }
-        
-        Form = form;
-        _request = default!;
-        _options = FormOptions.Default;
-    }
-    
-    
-    public FormFeature(HttpRequest request) : this(request, FormOptions.Default)
-    {
-    }
-    
-    public FormFeature(
-        HttpRequest request, 
-        FormOptions options)        
-    {
-        if (request == null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-        if (options == null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
-        
-        _request = request;
-        _options = options;
-    }
-    
-    /* 方法 */    
-    
-    public IFormCollection ReadForm()
-    {
-        if (Form != null)
-        {
-            return Form;
-        }
-        
-        if (!HasFormContentType)
-        {
-            throw new InvalidOperationException(
-                "Incorrect Content-Type: " + _request.ContentType);
-        }
-        
-        // TODO: Issue #456 Avoid Sync-over-Async 
-        // http://blogs.msdn.com/b/pfxteam/archive/2012/04/13/10293638.aspx
-        // TODO: How do we prevent thread exhaustion?
-        return ReadFormAsync().GetAwaiter().GetResult();
-    }
-    
-    /// <inheritdoc />
-    public Task<IFormCollection> ReadFormAsync() => ReadFormAsync(CancellationToken.None);
-    
-    /// <inheritdoc />
-    public Task<IFormCollection> ReadFormAsync(CancellationToken cancellationToken)
-    {
-        // Avoid state machine and task allocation for repeated reads
-        if (_parsedFormTask == null)
-        {
-            if (Form != null)
-            {
-                _parsedFormTask = Task.FromResult(Form);
-            }
-            else
-            {
-                _parsedFormTask = InnerReadFormAsync(cancellationToken);
-            }
-        }
-        return _parsedFormTask;
-    }
-    
-    private async Task<IFormCollection> InnerReadFormAsync(
-        CancellationToken cancellationToken)
-    {
-        if (!HasFormContentType)
-        {
-            throw new InvalidOperationException(
-                "Incorrect Content-Type: " + _request.ContentType);
-        }
-        
-        cancellationToken.ThrowIfCancellationRequested();
-        
-        if (_request.ContentLength == 0)
-        {
-            return FormCollection.Empty;
-        }
-        
-        if (_options.BufferBody)
-        {
-            _request.EnableRewind(
-                _options.MemoryBufferThreshold, 
-                _options.BufferBodyLengthLimit);
-        }
-        
-        FormCollection? formFields = null;
-        FormFileCollection? files = null;
-        
-        // Some of these code paths use StreamReader 
-        // which does not support cancellation tokens.
-        using (cancellationToken.Register(
-                  state => ((HttpContext)state!).Abort(), 
-            	  _request.HttpContext))
-        {
-            var contentType = ContentType;
-            // Check the content-type
-            if (HasApplicationFormContentType(contentType))
-            {
-                var encoding = FilterEncoding(contentType.Encoding);
-                var formReader = new FormPipeReader(_request.BodyReader, encoding)
-                {
-                    ValueCountLimit = _options.ValueCountLimit,
-                    KeyLengthLimit = _options.KeyLengthLimit,
-                    ValueLengthLimit = _options.ValueLengthLimit,
-                };
-                formFields = new FormCollection(
-                    await formReader.ReadFormAsync(cancellationToken));
-            }
-            else if (HasMultipartFormContentType(contentType))
-            {
-                var formAccumulator = new KeyValueAccumulator();
-                
-                var boundary = GetBoundary(
-                    contentType, 
-                    _options.MultipartBoundaryLengthLimit);
-                var multipartReader = new MultipartReader(boundary, _request.Body)
-                {
-                    HeadersCountLimit = _options.MultipartHeadersCountLimit,
-                    HeadersLengthLimit = _options.MultipartHeadersLengthLimit,
-                    BodyLengthLimit = _options.MultipartBodyLengthLimit,
-                };
-                var section = await multipartReader
-                    .ReadNextSectionAsync(cancellationToken);
-                while (section != null)
-                {
-                    // Parse the content disposition here 
-                    // and pass it further to avoid eparsings
-                    if (!ContentDispositionHeaderValue.TryParse(
-                        	section.ContentDisposition, 
-                        	out var contentDisposition))
-                    {
-                        throw new InvalidDataException(
-                            "Form section has invalid Content-Disposition value: " + 
-                            section.ContentDisposition);
-                    }
-                    
-                    if (contentDisposition.IsFileDisposition())
-                    {
-                        var fileSection = new FileMultipartSection(
-                            section, 
-                            contentDisposition);
-                        
-                        // Enable buffering for the file if not already done for the full body
-                        section.EnableRewind(
-                            _request
-                            	.HttpContext
-                            	.Response
-                            	.RegisterForDispose,
-                            _options.MemoryBufferThreshold, 
-                            _options.MultipartBodyLengthLimit);
-                        
-                        // Find the end
-                        await section.Body.DrainAsync(cancellationToken);
-                        
-                        var name = fileSection.Name;
-                        var fileName = fileSection.FileName;
-                        
-                        FormFile file;
-                        if (section.BaseStreamOffset.HasValue)
-                        {
-                            // Relative reference to buffered request body
-                            file = new FormFile(
-                                _request.Body, 
-                                section.BaseStreamOffset.GetValueOrDefault(), 
-                                section.Body.Length, 
-                                name, 
-                                fileName);
-                        }
-                        else
-                        {
-                            // Individually buffered file body
-                            file = new FormFile(
-                                section.Body, 
-                                0, 
-                                section.Body.Length, 
-                                name, 
-                                fileName);
-                        }
-                        file.Headers = new HeaderDictionary(section.Headers);
-                        
-                        if (files == null)
-                        {
-                            files = new FormFileCollection();
-                        }
-                        if (files.Count >= _options.ValueCountLimit)
-                        {
-                            throw new InvalidDataException(
-                                $"Form value count limit 
-                                "{_options.ValueCountLimit} exceeded.");
-                        }
-                        files.Add(file);
-                    }
-                    else if (contentDisposition.IsFormDisposition())
-                    {
-                        var formDataSection = new FormMultipartSection(
-                            section, 
-                            contentDisposition);
-                        
-                        // Content-Disposition: form-data; name="key" value                   
-                        // Do not limit the key name length here 
-                        // because the multipart headers length limit is already in effect.
-                        var key = formDataSection.Name;
-                        var value = await formDataSection.GetValueAsync();
-                        
-                        formAccumulator.Append(key, value);
-                        if (formAccumulator.ValueCount > _options.ValueCountLimit)
-                        {
-                            throw new InvalidDataException(
-                                $"Form value count limit 
-                                "{_options.ValueCountLimit} exceeded.");
-                        }
-                    }
-                    else
-                    {
-                        System
-                            .Diagnostics
-                            .Debug
-                            .Assert(
-                            	false, 
-                            	"Unrecognized content-disposition for this section: " +
-                            	section.ContentDisposition);
-                    }
-                    
-                    section = await multipartReader
-                        .ReadNextSectionAsync(cancellationToken);
-                }
-                
-                if (formAccumulator.HasValues)
-                {
-                    formFields = new FormCollection(
-                        formAccumulator.GetResults(), 
-                        files);
-                }
-            }
-        }
-        
-        // Rewind so later readers don't have to.
-        if (_request.Body.CanSeek)
-        {
-            _request.Body.Seek(0, SeekOrigin.Begin);
-        }
-        
-        if (formFields != null)
-        {
-            Form = formFields;
-        }
-        else if (files != null)
-        {
-            Form = new FormCollection(null, files);
-        }
-        else
-        {
-            Form = FormCollection.Empty;
-        }
-        
-        return Form;
-    }
-    
-    private static Encoding FilterEncoding(Encoding? encoding)
-    {
-        // UTF-7 is insecure and should not be honored. 
-        // UTF-8 will succeed for most cases.
-        // https://docs.microsoft.com/en-us/dotnet/core/compatibility/syslib-warnings/syslib0001
-        if (encoding == null || encoding.CodePage == 65000)
-        {
-            return Encoding.UTF8;
-        }
-        return encoding;
-    }
-    
-    private bool HasApplicationFormContentType(
-        [NotNullWhen(true)] MediaTypeHeaderValue? contentType)
-    {
-        // Content-Type: application/x-www-form-urlencoded; charset=utf-8
-        return contentType != null && 
-               contentType
-               	   .MediaType
-            	   .Equals(
-            		   "application/x-www-form-urlencoded", 
-            		   StringComparison.OrdinalIgnoreCase);
-    }
-    
-    private bool HasMultipartFormContentType(
-        [NotNullWhen(true)] MediaTypeHeaderValue? contentType)
-    {
-        // Content-Type: multipart/form-data; 
-        // boundary=----WebKitFormBoundarymx2fSWqWSd0OxQqq
-        return contentType != null && 
-               contentType
-                   .MediaType
-            	   .Equals(
-            		   "multipart/form-data", 
-            		   StringComparison.OrdinalIgnoreCase);
-    }
-    
-    private bool HasFormDataContentDisposition(
-        ContentDispositionHeaderValue contentDisposition)
-    {
-        // Content-Disposition: form-data; name="key";
-        return contentDisposition != null && 
-               contentDisposition
-            	   .DispositionType
-             	   .Equals("form-data") && 
-               StringSegment
-            	   .IsNullOrEmpty(contentDisposition.FileName) && 
-               StringSegment
-            	   .IsNullOrEmpty(contentDisposition.FileNameStar);
-    }
-    
-    private bool HasFileContentDisposition(
-        ContentDispositionHeaderValue contentDisposition)
-    {
-        // Content-Disposition: form-data; name="myfile1"; filename="Misc 002.jpg"
-        return contentDisposition != null && 
-               contentDisposition
-             	   .DispositionType
-            	   .Equals("form-data") && 
-               (!StringSegment.IsNullOrEmpty(contentDisposition.FileName) || 
-                !StringSegment.IsNullOrEmpty(contentDisposition.FileNameStar));
-    }
-    
-    // Content-Type: multipart/form-data; boundary="----WebKitFormBoundarymx2fSWqWSd0OxQqq"
-    // The spec says 70 characters is a reasonable limit.
-    private static string GetBoundary(
-        MediaTypeHeaderValue contentType, 
-        int lengthLimit)
-    {
-        var boundary = HeaderUtilities
-            .RemoveQuotes(contentType.Boundary);
-        if (StringSegment.IsNullOrEmpty(boundary))
-        {
-            throw new InvalidDataException("Missing content-type boundary.");
-        }
-        if (boundary.Length > lengthLimit)
-        {
-            throw new InvalidDataException(
-                $"Multipart boundary length limit {lengthLimit} exceeded.");
-        }
-        return boundary.ToString();
-    }
-}
-
-```
-
-* form options
-
-```c#
-public class FormOptions
-{
-    internal static readonly FormOptions Default = new FormOptions();
-        
-    public const int DefaultMemoryBufferThreshold = 1024 * 64;        
-    public const int DefaultBufferBodyLengthLimit = 1024 * 1024 * 128;        
-    public const int DefaultMultipartBoundaryLengthLimit = 128;        
-    public const long DefaultMultipartBodyLengthLimit = 1024 * 1024 * 128;
-        
-    public bool BufferBody { get; set; } = false;        
-    public int MemoryBufferThreshold { get; set; } = DefaultMemoryBufferThreshold;        
-    public long BufferBodyLengthLimit { get; set; } = DefaultBufferBodyLengthLimit;        
-    public int ValueCountLimit { get; set; } = FormReader.DefaultValueCountLimit;        
-    public int KeyLengthLimit { get; set; } = FormReader.DefaultKeyLengthLimit;        
-    public int ValueLengthLimit { get; set; } = FormReader.DefaultValueLengthLimit;      
-    
-    public int MultipartBoundaryLengthLimit { get; set; } = 
-        DefaultMultipartBoundaryLengthLimit;        
-    public int MultipartHeadersCountLimit { get; set; } = 
-        MultipartReader.DefaultHeadersCountLimit;        
-    public int MultipartHeadersLengthLimit { get; set; } = 
-        MultipartReader.DefaultHeadersLengthLimit;        
-    public long MultipartBodyLengthLimit { get; set; } = 
-        DefaultMultipartBodyLengthLimit;
-}
-
-```
 
 
 
@@ -6999,58 +7168,9 @@ public class FormOptions
 
 ##### 2.9.2 response
 
-###### 2.9.2.1 response feature
 
-* 接口
 
-```c#
-public interface IHttpResponseFeature
-{    
-    int StatusCode { get; set; }        
-    string? ReasonPhrase { get; set; }        
-    IHeaderDictionary Headers { get; set; }        
-    [Obsolete("Use IHttpResponseBodyFeature.Stream instead.", error: false)]
-    Stream Body { get; set; }        
-    bool HasStarted { get; }
-        
-    void OnStarting(Func<object, Task> callback, object state);        
-    void OnCompleted(Func<object, Task> callback, object state);
-}
 
-```
-
-* 实现
-
-```c#
-public class HttpResponseFeature : IHttpResponseFeature
-{
-    public int StatusCode { get; set; }        
-    public string? ReasonPhrase { get; set; }        
-    public IHeaderDictionary Headers { get; set; }        
-    public Stream Body { get; set; }        
-    public virtual bool HasStarted => false;
-    
-    public HttpResponseFeature()
-    {
-        StatusCode = 200;
-        Headers = new HeaderDictionary();
-        Body = Stream.Null;
-    }
-                   
-    public virtual void OnStarting(
-        Func<object, Task> callback, 
-        object state)
-    {
-    }
-        
-    public virtual void OnCompleted(
-        Func<object, Task> callback, 
-        object state)
-    {
-    }
-}
-
-```
 
 ###### 2.9.2.2 response trailer feature
 
@@ -7064,120 +7184,15 @@ public interface IHttpResponseTrailersFeature
 
 
 
-###### 2.9.2.3 response cookies feature
-
-* 接口
-
-```c#
-public interface IResponseCookiesFeature
-{    
-    IResponseCookies Cookies { get; }
-}
-
-```
-
-* 实现
-
-```c#
-public class ResponseCookiesFeature : IResponseCookiesFeature
-{    
-    private readonly static Func<IFeatureCollection, IHttpResponseFeature?> 
-        nullResponseFeature = f => null;
-    
-    private readonly IFeatureCollection _features;
-    private IResponseCookies? _cookiesCollection;
-    
-    public IResponseCookies Cookies
-    {
-        get
-        {
-            if (_cookiesCollection == null)
-            {
-                _cookiesCollection = new ResponseCookies(_features);
-            }
-            
-            return _cookiesCollection;
-        }
-    }
-    
-    public ResponseCookiesFeature(IFeatureCollection features)
-    {
-        _features = features 
-            ?? throw new ArgumentNullException(nameof(feaures));
-    }        
-}
-
-```
-
-###### 2.9.2.4 response body feature
-
-```c#
-public interface IHttpResponseBodyFeature
-{    
-    Stream Stream { get; }    
-    PipeWriter Writer { get; }
-            
-    void DisableBuffering();      
-    
-    Task StartAsync(CancellationToken cancellationToken = default);    
-    
-    Task SendFileAsync(
-        string path, 
-        long offset, 
-        long? count, 
-        CancellationToken cancellationToken = default);     
-    
-    Task CompleteAsync();
-}
-
-```
 
 
 
-##### 2.9.3 http connection feature
 
-* 接口
 
-```c#
-public interface IHttpConnectionFeature
-{    
-    string ConnectionId { get; set; }
-        
-    IPAddress? RemoteIpAddress { get; set; }
-    int RemotePort { get; set; }
-    
-    IPAddress? LocalIpAddress { get; set; }                   
-    int LocalPort { get; set; }
-}
 
-```
 
-* 实现
 
-```c#
-public class HttpConnectionFeature : IHttpConnectionFeature
-{    
-    public string ConnectionId { get; set; } = default!;        
 
-    public IPAddress? LocalIpAddress { get; set; }        
-    public int LocalPort { get; set; }
-        
-    public IPAddress? RemoteIpAddress { get; set; }    
-    public int RemotePort { get; set; }
-}
-
-```
-
-##### 2.9.4 http web socket feature
-
-```c#
-public interface IHttpWebSocketFeature
-{    
-    bool IsWebSocketRequest { get; }        
-    Task<WebSocket> AcceptAsync(WebSocketAcceptContext context);
-}
-
-```
 
 ##### 2.9.5 http upgrade feature
 
@@ -7221,38 +7236,19 @@ public interface IHttpResetFeature
 
 ```
 
-##### 2.9.9 session
 
-```c#
-public interface ISessionFeature
-{    
-    ISession Session { get; set; }
-}
 
-```
 
-##### 2.9.10 authentication (claims)
 
-```c#
-public interface IHttpAuthenticationFeature
-{    
-    ClaimsPrincipal? User { get; set; }
-}
 
-```
+
+
 
 ##### 2.9.11 tls
 
-###### 2.9.11.1 tls connection feature
 
-```c#
-public interface ITlsConnectionFeature
-{    
-    X509Certificate2? ClientCertificate { get; set; }        
-    Task<X509Certificate2?> GetClientCertificateAsync(CancellationToken cancellationToken);
-}
 
-```
+
 
 ###### 2.9.11.2 tls token binding feature
 
@@ -7261,29 +7257,6 @@ public interface ITlsTokenBindingFeature
 {    
     byte[] GetProvidedTokenBindingId();            
     byte[] GetReferredTokenBindingId();
-}
-
-```
-
-##### 2.9.12 service provider feature
-
-* 接口
-
-```c#
-public interface IServiceProvidersFeature
-{    
-    IServiceProvider RequestServices { get; set; }
-}
-
-```
-
-* 实现
-
-```c#
-public class ServiceProvidersFeature : IServiceProvidersFeature
-{
-    /// <inheritdoc />
-    public IServiceProvider RequestServices { get; set; } = default!
 }
 
 ```
