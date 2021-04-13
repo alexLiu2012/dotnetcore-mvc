@@ -77,7 +77,7 @@ generic host 就是这样的容器，它是 microsoft 提供的 web application 
 
 #### 2.1 host
 
-##### 2.1.1 IHost 接口
+##### 2.1.1 接口
 
 ```c#
 public interface IHost : IDisposable
@@ -90,7 +90,7 @@ public interface IHost : IDisposable
 
 ```
 
-##### 2.1.2 Host 实现
+##### 2.1.2 Host
 
 ```c#
 internal class Host : IHost, IAsyncDisposable
@@ -143,7 +143,112 @@ internal class Host : IHost, IAsyncDisposable
 
 ```
 
-###### 2.1.2.1 host start
+###### 2.1.2.1 host options
+
+```c#
+public class HostOptions
+{    
+    public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    
+    internal void Initialize(IConfiguration configuration)
+    {
+        var timeoutSeconds = configuration["shutdownTimeoutSeconds"];
+        
+        if (!string.IsNullOrEmpty(timeoutSeconds) && 
+            int.TryParse(
+                timeoutSeconds, 
+                NumberStyles.None, 
+                CultureInfo.InvariantCulture, 
+                out var seconds))
+        {
+            ShutdownTimeout = TimeSpan.FromSeconds(seconds);
+        }
+    }
+}
+
+```
+
+###### 2.1.2.2 hosted service
+
+```c#
+public interface IHostedService
+{    
+    Task StartAsync(CancellationToken cancellationToken);        
+    Task StopAsync(CancellationToken cancellationToken);
+}
+
+```
+
+###### 2.1.2.3 background service 
+
+```c#
+public abstract class BackgroundService : IHostedService, IDisposable
+{
+    // 执行的任务的引用
+    private Task _executeTask;
+    public virtual Task ExecuteTask => _executeTask;
+    
+    private CancellationTokenSource _stoppingCts;
+                    
+    // 具体任务，在派生类中实现
+    protected abstract Task ExecuteAsync(CancellationToken stoppingToken);
+        
+    /* 启动任务 */
+    public virtual Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Create linked token to allow cancelling executing task from provided token
+        _stoppingCts = CancellationTokenSource      
+            			   .CreateLinkedTokenSource(cancellationToken);
+        
+        // Store the task we're executing
+        _executeTask = ExecuteAsync(_stoppingCts.Token);
+        
+        // If the task is completed then return it, 
+        // this will bubble cancellation and failure to the caller
+        if (_executeTask.IsCompleted)
+        {
+            return _executeTask;
+        }
+        
+        // Otherwise it's running
+        return Task.CompletedTask;
+    }
+    
+    /* 结束任务 */
+    public virtual async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Stop called without start
+        if (_executeTask == null)
+        {
+            return;
+        }
+        
+        try
+        {
+            // Signal cancellation to the executing method
+            _stoppingCts.Cancel();
+        }
+        finally
+        {
+            // Wait until the task completes or the stop token triggers
+            await Task.WhenAny(
+                	      _executeTask, 
+                		  Task.Delay(Timeout.Infinite, cancellationToken))
+                	  .ConfigureAwait(false);
+        }        
+    }
+    
+    public virtual void Dispose()
+    {
+        _stoppingCts?.Cancel();
+    }
+}
+
+```
+
+##### 2.1.3 方法
+
+###### 2.1.3.1 host start
 
 ```c#
 internal class Host : IHost, IAsyncDisposable
@@ -211,7 +316,7 @@ internal class Host : IHost, IAsyncDisposable
 
 ```
 
-###### 2.1.2.2 host stop
+###### 2.1.3.2 host stop
 
 ```c#
 internal class Host : IHost, IAsyncDisposable
@@ -284,7 +389,7 @@ internal class Host : IHost, IAsyncDisposable
 
 ```
 
-###### 2.1.2.3 host dispose
+###### 2.1.3.3 host dispose
 
 ```c#
 internal class Host : IHost, IAsyncDisposable
@@ -302,6 +407,7 @@ internal class Host : IHost, IAsyncDisposable
                 await asyncDisposable.DisposeAsync()
                     				 .ConfigureAwait(false);
                 break;
+                
             case IDisposable disposable:
                 disposable.Dispose();
                 break;
@@ -311,11 +417,11 @@ internal class Host : IHost, IAsyncDisposable
 
 ```
 
-##### 2.1.3 扩展的 host 方法
+##### 2.1.4 扩展方法
 
 * recommended method to start、stop the host
 
-###### 2.1.3.1 start
+###### 2.1.4.1 start
 
 * 扩展了 start 同步方法
 
@@ -332,7 +438,7 @@ public static class HostingAbstractionsHostExtensions
 
 ```
 
-###### 2.1.3.2 wait for stop
+###### 2.1.4.2 wait for stop
 
 ```c#
 public static class HostingAbstractionsHostExtensions
@@ -385,7 +491,7 @@ public static class HostingAbstractionsHostExtensions
 
 ```
 
-###### 2.1.3.3 run
+###### 2.1.4.3 run
 
 * 同步和异步 run 方法
 
@@ -430,7 +536,7 @@ public static class HostingAbstractionsHostExtensions
 
 ```
 
-###### 2.1.3.4 stop
+###### 2.1.4.4 stop
 
 ```c#
 public static class HostingAbstractionsHostExtensions
@@ -445,130 +551,28 @@ public static class HostingAbstractionsHostExtensions
 
 ```
 
-##### 2.1.4 host 组件
-
-###### 2.1.4.1 host options
-
-```c#
-public class HostOptions
-{    
-    public TimeSpan ShutdownTimeout { get; set; } = 
-        TimeSpan.FromSeconds(5);
-    
-    internal void Initialize(IConfiguration configuration)
-    {
-        var timeoutSeconds = configuration["shutdownTimeoutSeconds"];
-        
-        if (!string.IsNullOrEmpty(timeoutSeconds) && 
-            int.TryParse(
-                timeoutSeconds, 
-                NumberStyles.None, 
-                CultureInfo.InvariantCulture, 
-                out var seconds))
-        {
-            ShutdownTimeout = TimeSpan.FromSeconds(seconds);
-        }
-    }
-}
-
-```
-
-###### 2.1.4.2 hosted service
-
-```c#
-public interface IHostedService
-{    
-    Task StartAsync(CancellationToken cancellationToken);        
-    Task StopAsync(CancellationToken cancellationToken);
-}
-
-```
-
-###### 2.1.4.3 background service
-
-```c#
-public abstract class BackgroundService : IHostedService, IDisposable
-{
-    // 执行的任务的引用
-    private Task _executeTask;
-    public virtual Task ExecuteTask => _executeTask;
-    
-    private CancellationTokenSource _stoppingCts;
-                    
-    // 具体任务，在派生类中实现
-    protected abstract Task ExecuteAsync(CancellationToken stoppingToken);
-        
-    /* 启动任务 */
-    public virtual Task StartAsync(CancellationToken cancellationToken)
-    {
-        // Create linked token to allow cancelling executing task from provided token
-        _stoppingCts = CancellationTokenSource      
-            			   .CreateLinkedTokenSource(cancellationToken);
-        
-        // Store the task we're executing
-        _executeTask = ExecuteAsync(_stoppingCts.Token);
-        
-        // If the task is completed then return it, 
-        // this will bubble cancellation and failure to the caller
-        if (_executeTask.IsCompleted)
-        {
-            return _executeTask;
-        }
-        
-        // Otherwise it's running
-        return Task.CompletedTask;
-    }
-    
-    /* 结束任务 */
-    public virtual async Task StopAsync(CancellationToken cancellationToken)
-    {
-        // Stop called without start
-        if (_executeTask == null)
-        {
-            return;
-        }
-        
-        try
-        {
-            // Signal cancellation to the executing method
-            _stoppingCts.Cancel();
-        }
-        finally
-        {
-            // Wait until the task completes or the stop token triggers
-            await Task.WhenAny(
-                	      _executeTask, 
-                		  Task.Delay(Timeout.Infinite, cancellationToken))
-                	  .ConfigureAwait(false);
-        }        
-    }
-    
-    public virtual void Dispose()
-    {
-        _stoppingCts?.Cancel();
-    }
-}
-
-```
-
 #### 2.2 host builder
 
 ##### 2.2.1 接口
 
 ```c#
 public interface IHostBuilder
-{    
-    /* 配置 host builder 的 action 集合*/         
+{        
     IHostBuilder ConfigureHostConfiguration(
-        Action<IConfigurationBuilder> configureDelegate);        
+        Action<IConfigurationBuilder> configureDelegate);   
+    
     IHostBuilder ConfigureAppConfiguration(
-        Action<HostBuilderContext, IConfigurationBuilder> configureDelegate);        
+        Action<HostBuilderContext, IConfigurationBuilder> configureDelegate);       
+    
     IHostBuilder ConfigureServices(
-        Action<HostBuilderContext, IServiceCollection> configureDelegate);        
+        Action<HostBuilderContext, IServiceCollection> configureDelegate);       
+    
     IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
         IServiceProviderFactory<TContainerBuilder> factory);        
+    
     IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
-        Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> factory);        
+        Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> factory);   
+    
     IHostBuilder ConfigureContainer<TContainerBuilder>(
         Action<HostBuilderContext, TContainerBuilder> configureDelegate);
     
@@ -580,21 +584,23 @@ public interface IHostBuilder
 
 ```
 
-##### 2.2.2 实现
+##### 2.2.2 host builder
 
 ```c#
 public class HostBuilder : IHostBuilder
-{
-    /* 用于配置 host builder 的 action 集合 */
+{    
     private List<Action<IConfigurationBuilder>> 
         _configureHostConfigActions = 
         	new List<Action<IConfigurationBuilder>>();
+    
     private List<Action<HostBuilderContext, IConfigurationBuilder>> 
         _configureAppConfigActions = 
         	new List<Action<HostBuilderContext, IConfigurationBuilder>>();
+    
     private List<Action<HostBuilderContext, IServiceCollection>> 
         _configureServicesActions = 
         	new List<Action<HostBuilderContext, IServiceCollection>>();
+    
     private List<IConfigureContainerAdapter> 
         _configureContainerActions = 
         	new List<IConfigureContainerAdapter>();    
@@ -603,8 +609,10 @@ public class HostBuilder : IHostBuilder
     private IServiceFactoryAdapter _serviceProviderFactory = 
         new ServiceFactoryAdapter<IServiceCollection>(
         	new DefaultServiceProviderFactory());    
+    
     // built 标记
     private bool _hostBuilt;
+    
     // 传递数据
     public IDictionary<object, object> Properties { get; } = 
         new Dictionary<object, object>();
@@ -648,7 +656,7 @@ public class HostBuilder : IHostBuilder
 
 * host builder 提供了配置 builder 的方法
 
-###### 2.2.3.1  配置 configuration
+###### 2.2.3.1  configure  configuration
 
 * host configuration 和 host application configuration 最终合并到 host builder context
 
@@ -680,7 +688,7 @@ public class HostBuilder : IHostBuilder
 
 ```
 
-###### 2.2.3.2 注册服务
+###### 2.2.3.2 configure service
 
 ```c#
 public class HostBuilder : IHostBuilder
@@ -698,7 +706,7 @@ public class HostBuilder : IHostBuilder
 }
 ```
 
-###### 2.2.3.3 配置 container builder
+###### 2.2.3.3 configure container builder
 
 ```c#
 public class HostBuilder : IHostBuilder
@@ -708,15 +716,15 @@ public class HostBuilder : IHostBuilder
     {
         _configureContainerActions.Add(
             new ConfigureContainerAdapter<TContainerBuilder>(
-                configureDelegate ?? 
-                	throw new ArgumentNullException(nameof(configureDelegate))));
+                configureDelegate 
+                	?? throw new ArgumentNullException(nameof(configureDelegate))));
         
         return this;
     }
 }
 ```
 
-###### 2.2.3.4 配置 service provider factory
+###### 2.2.3.4 use service provider factory
 
 ```c#
 public class HostBuilder : IHostBuilder
@@ -747,9 +755,9 @@ public class HostBuilder : IHostBuilder
 
 ```
 
-##### 2.2.4 扩展的配置方法
+##### 2.2.4 扩展方法
 
-###### 2.2.4.1 配置 environment
+###### 2.2.4.1 use environment
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -789,7 +797,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.2 配置 app configuration
+###### 2.2.4.2 configure app configuration
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -805,7 +813,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.3 使用 default service provider
+###### 2.2.4.3 use default service provider
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -832,7 +840,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.4 注册服务
+###### 2.2.4.4 configure service
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -848,7 +856,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.2.4.5 配置 container builer
+###### 2.2.4.5 configure container builer
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -1142,7 +1150,7 @@ public interface IHostEnvironment
 
 ```
 
-###### 2.2.6.2 实现
+###### 2.2.6.2 hosting environment
 
 ```c#
 public class HostingEnvironment : IHostEnvironment
@@ -1266,7 +1274,7 @@ internal interface IServiceFactoryAdapter
 
 ```
 
-###### 2.2.8.2 实现
+###### 2.2.8.2 service factory adapter
 
 ```c#
 internal class ServiceFactoryAdapter<TContainerBuilder> : IServiceFactoryAdapter
@@ -1336,7 +1344,7 @@ public interface IHostLifetime
 
 ```
 
-##### 2.2.1 console lifetime
+##### 2.3.1 console lifetime
 
 ```c#
 public class ConsoleLifetime : IHostLifetime, IDisposable
@@ -1389,7 +1397,7 @@ public class ConsoleLifetime : IHostLifetime, IDisposable
 
 ```
 
-###### 2.2.1.1 wait for start
+###### 2.3.1.1 wait for start
 
 ```c#
 public class ConsoleLifetime 
@@ -1474,7 +1482,7 @@ public class ConsoleLifetime
 
 ```
 
-###### 2.2.1.2 stop and dispose
+###### 2.3.1.2 stop and dispose
 
 ```c#
 public class ConsoleLifetime 
@@ -1499,7 +1507,7 @@ public class ConsoleLifetime
 
 ```
 
-###### 2.2.1.3 console lifetime options
+###### 2.3.1.3 console lifetime options
 
 ```c#
 public class ConsoleLifetimeOptions
@@ -1509,7 +1517,7 @@ public class ConsoleLifetimeOptions
 
 ```
 
-###### 2.2.1.4 use console lifetime
+###### 2.3.1.4 use console lifetime
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -1559,7 +1567,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-##### 2.2.2 systemd lifetime
+##### 2.3.2 systemd lifetime
 
 ```c#
 public class SystemdLifetime : IHostLifetime, IDisposable
@@ -1596,7 +1604,7 @@ public class SystemdLifetime : IHostLifetime, IDisposable
 
 ```
 
-###### 2.2.2.1 wait for start
+###### 2.3.2.1 wait for start
 
 ```c#
 public class SystemdLifetime
@@ -1667,7 +1675,7 @@ public class SystemdLifetime
 
 ```
 
-###### 2.2.2.2 stop and dispose
+###### 2.3.2.2 stop and dispose
 
 ```c#
 public class SystemdLifetime
@@ -1688,7 +1696,7 @@ public class SystemdLifetime
 
 ```
 
-###### 2.2.2.3 systemd notifier
+###### 2.3.2.3 systemd notifier
 
 ```c#
 public interface ISystemdNotifier
@@ -1764,7 +1772,7 @@ public class SystemdNotifier : ISystemdNotifier
 
 ```
 
-###### 2.2.2.3 use systemd lifetime
+###### 2.3.2.3 use systemd lifetime
 
 ```c#
 public static class SystemdHostBuilderExtensions
@@ -1792,7 +1800,7 @@ public static class SystemdHostBuilderExtensions
 
 ```
 
-##### 2.2.3 windows service lifetime
+##### 2.3.3 windows service lifetime
 
 ```c#
 public class WindowsServiceLifetime : IHostLifetime, ServiceBase
@@ -1852,7 +1860,7 @@ public class WindowsServiceLifetime : IHostLifetime, ServiceBase
 
 ```
 
-###### 2.2.3.1 wait for start
+###### 2.3.3.1 wait for start
 
 ```c#
 public class WindowsServiceLifetime 
@@ -1914,7 +1922,7 @@ public class WindowsServiceLifetime
 }
 ```
 
-###### 2.2.3.2 stop
+###### 2.3.3.2 stop
 
 ```c#
 public class WindowsServiceLifetime 
@@ -1929,7 +1937,7 @@ public class WindowsServiceLifetime
 }
 ```
 
-###### 2.2.3.3 override base service
+###### 2.3.3.3 override base service
 
 ```c#
 public class WindowsServiceLifetime 
@@ -1973,7 +1981,7 @@ public class WindowsServiceLifetime
 
 ```
 
-###### 2.2.3.4 windows service lifetime options
+###### 2.3.3.4 windows service lifetime options
 
 ```c#
 public class WindowsServiceLifetimeOptions
@@ -1983,7 +1991,7 @@ public class WindowsServiceLifetimeOptions
 
 ```
 
-###### 2.2.3.5 use windows service lifetime
+###### 2.3.3.5 use windows service lifetime
 
 ```c#
 public static class WindowsServiceLifetimeHostBuilderExtensions
@@ -2045,14 +2053,20 @@ public interface IHostApplicationLifetime
 
 ```
 
-##### 2.4.2 实现
+##### 2.4.2 application lifetime
 
 ```c#
 public class ApplicationLifetime : IHostApplicationLifetime
 {
     private readonly CancellationTokenSource _startedSource = new CancellationTokenSource();
+    public CancellationToken ApplicationStarted => _startedSource.Token;
+    
     private readonly CancellationTokenSource _stoppingSource = new CancellationTokenSource();
+    public CancellationToken ApplicationStopping => _stoppingSource.Token;
+    
     private readonly CancellationTokenSource _stoppedSource = new CancellationTokenSource();
+    public CancellationToken ApplicationStopped => _stoppedSource.Token;
+    
     private readonly ILogger<ApplicationLifetime> _logger;
     
     public ApplicationLifetime(ILogger<ApplicationLifetime> logger)
@@ -2060,28 +2074,6 @@ public class ApplicationLifetime : IHostApplicationLifetime
         _logger = logger;
     }
     
-    /// <summary>
-    /// Triggered when the application host has fully started and is about to wait
-    /// for a graceful shutdown.
-    /// </summary>
-    public CancellationToken ApplicationStarted => _startedSource.Token;
-    
-    /// <summary>
-    /// Triggered when the application host is performing a graceful shutdown.
-    /// Request may still be in flight. Shutdown will block until this event completes.
-    /// </summary>
-    public CancellationToken ApplicationStopping => _stoppingSource.Token;
-    
-    /// <summary>
-    /// Triggered when the application host is performing a graceful shutdown.
-    /// All requests should be complete at this point. Shutdown will block
-    /// until this event completes.
-    /// </summary>
-    public CancellationToken ApplicationStopped => _stoppedSource.Token;
-    
-    /// <summary>
-    /// Signals the ApplicationStopping event and blocks until it completes.
-    /// </summary>
     public void StopApplication()
     {
         // Lock on CTS to synchronize multiple calls to StopApplication. 
@@ -2104,10 +2096,7 @@ public class ApplicationLifetime : IHostApplicationLifetime
             }
         }
     }
-    
-    /// <summary>
-    /// Signals the ApplicationStarted event and blocks until it completes.
-    /// </summary>
+        
     public void NotifyStarted()
     {
         try
@@ -2122,10 +2111,7 @@ public class ApplicationLifetime : IHostApplicationLifetime
                 ex);
         }
     }
-    
-    /// <summary>
-    /// Signals the ApplicationStopped event and blocks until it completes.
-    /// </summary>
+        
     public void NotifyStopped()
     {
         try
@@ -2254,7 +2240,7 @@ internal static class HostingLoggerExtensions
 
 见 2.2
 
-##### 2.6.2 by Host
+##### 2.6.2 by Host 静态类
 
 * 创建 host 的静态方法
 
@@ -2270,19 +2256,18 @@ public static class Host
         
         // 配置默认的 environment
                 
-        builder
-            .ConfigureAppConfiguration((hostingContext, config) =>
-            	{
-                    // ...
-                })            	
-            .ConfigureLogging((hostingContext, logging) =>
-            	{
-                    // ...
-                })            
-            .UseDefaultServiceProvider((context, options) => 
-            	{
-                    // ...
-                });
+        builder.ConfigureAppConfiguration((hostingContext, config) =>
+                                          {
+                                              // ...
+                                          })            	
+               .ConfigureLogging((hostingContext, logging) =>
+                                 {
+                                     // ...
+                                 })            
+               .UseDefaultServiceProvider((context, options) => 
+                                          {
+                                              // ...
+                                          });
         
         return builder;
     }

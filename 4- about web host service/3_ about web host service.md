@@ -157,7 +157,8 @@ internal class GenericWebHostService : IHostedService
         
         /* 解析 url address */
         // 从 configuration 中解析 url，并注入 server address feature
-        var serverAddressesFeature = Server.Features.Get<IServerAddressesFeature>();
+        var serverAddressesFeature = Server.Features
+            							   .Get<IServerAddressesFeature>();
         var addresses = serverAddressesFeature?.Addresses;
         if (addresses != null && 
             !addresses.IsReadOnly && 
@@ -191,7 +192,8 @@ internal class GenericWebHostService : IHostedService
             // 如果没有，抛出异常
             if (configure == null)
             {
-                throw new InvalidOperationException($"No application configured. Please specify an application via IWebHostBuilder.UseStartup, IWebHostBuilder.Configure, or specifying the startup assembly via {nameof(WebHostDefaults.StartupAssemblyKey)} in the web host configuration.");
+                throw new InvalidOperationException(
+                    $"No application configured. Please specify an application via IWebHostBuilder.UseStartup, IWebHostBuilder.Configure, or specifying the startup assembly via {nameof(WebHostDefaults.StartupAssemblyKey)} in the web host configuration.");
             }
             // 构建 application builder
             var builder = ApplicationBuilderFactory
@@ -336,43 +338,43 @@ internal class WebHostOptions
         }
 
         ApplicationName = 
-            configuration[WebHostDefaults.ApplicationKey] 
-            	?? applicationNameFallback;
+            configuration[WebHostDefaults.ApplicationKey] ?? applicationNameFallback;
+        
         Environment = 
             configuration[WebHostDefaults.EnvironmentKey];
+        
         ContentRootPath = 
             configuration[WebHostDefaults.ContentRootKey];
+        
         WebRoot = 
             configuration[WebHostDefaults.WebRootKey];
         
         StartupAssembly = 
             configuration[WebHostDefaults.StartupAssemblyKey];
-        // Search the primary assembly and configured assemblies.
-        HostingStartupAssemblies = 
-            Split(
-            	$"{ApplicationName};
-            	 "{configuation[WebHostDefaults.HostingStartupAssembliesKey]}");
-        HostingStartupExcludeAssemblies = 
-            Split(
-            	configuration[WebHostDefaults.HostingStartupExcludeAssembliesKey]);
         
-        PreventHostingStartup = 
-            WebHostUtilities.ParseBool(
-            	configuration, 
-            	WebHostDefaults.PreventHostingStartupKey);         
-        SuppressStatusMessages = 
-            WebHostUtilities.ParseBool(
-            	configuration, 
-            	WebHostDefaults.SuppressStatusMessagesKey);        
-        DetailedErrors = 
-            WebHostUtilities.ParseBool(
-            	configuration, 
-            	WebHostDefaults.DetailedErrorsKey);        
-        CaptureStartupErrors = 
-            WebHostUtilities.ParseBool(
-            	configuration, 
-            	WebHostDefaults.CaptureStartupErrorsKey);
-                                                        
+        // Search the primary assembly and configured assemblies.
+        HostingStartupAssemblies = Split(
+            $"{ApplicationName};{configuation[WebHostDefaults.HostingStartupAssembliesKey]}");
+        
+        HostingStartupExcludeAssemblies = Split(
+            configuration[WebHostDefaults.HostingStartupExcludeAssembliesKey]);
+        
+        PreventHostingStartup = WebHostUtilities.ParseBool(
+            configuration, 
+            WebHostDefaults.PreventHostingStartupKey);         
+        
+        SuppressStatusMessages = WebHostUtilities.ParseBool(
+            configuration, 
+            WebHostDefaults.SuppressStatusMessagesKey);        
+        
+        DetailedErrors = WebHostUtilities.ParseBool(
+            configuration, 
+            WebHostDefaults.DetailedErrorsKey);        
+        
+        CaptureStartupErrors = WebHostUtilities.ParseBool(
+            configuration, 
+            WebHostDefaults.CaptureStartupErrorsKey);
+        
         var timeout = configuration[WebHostDefaults.ShutdownTimeoutKey];
         if (!string.IsNullOrEmpty(timeout) && 
             int.TryParse(
@@ -397,8 +399,7 @@ internal class WebHostOptions
         return value?.Split(
             ';', 
             StringSplitOptions.TrimEntries | 
-            StringSplitOptions.RemoveEmptyEntries)
-                ?? Array.Empty<string>();
+            StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
     }
 }
 
@@ -430,6 +431,12 @@ internal class HostFilteringStartupFilter : IStartupFilter
         };
     }
 }
+
+```
+
+###### 2.1.4.3 middleware filter builder startup filter
+
+```c#
 
 ```
 

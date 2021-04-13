@@ -8,215 +8,11 @@
 
 ### 2. details
 
-#### 2.1 api description
+
+
+
 
 ```c#
-[DebuggerDisplay("{ActionDescriptor.DisplayName,nq}")]
-public class ApiDescription
-{    
-    public ActionDescriptor ActionDescriptor { get; set; } = default!;
-        
-    public string? GroupName { get; set; }        
-    public string? HttpMethod { get; set; }
-    public string RelativePath { get; set; } = default!;
-    public IDictionary<object, object> Properties { get; } = new Dictionary<object, object>();
-    
-    public IList<ApiParameterDescription> ParameterDescriptions { get; } = 
-        new List<ApiParameterDescription>();                                
-    public IList<ApiRequestFormat> SupportedRequestFormats { get; } = 
-        new List<ApiRequestFormat>();        
-    public IList<ApiResponseType> SupportedResponseTypes { get; } = 
-        new List<ApiResponseType>();
-}
-
-```
-
-##### 2.1.1 api description 组件
-
-###### 2.1.1.1 parameter description
-
-```c#
-public class ApiParameterDescription
-{    
-    public ModelMetadata ModelMetadata { get; set; } = default!;        
-    public string Name { get; set; } = default!;        
-    public ApiParameterRouteInfo? RouteInfo { get; set; }        
-    public BindingSource Source { get; set; } = default!;        
-    public BindingInfo? BindingInfo { get; set; }        
-    public Type Type { get; set; } = default!;        
-    public ParameterDescriptor ParameterDescriptor { get; set; } = default!;        
-    public bool IsRequired { get; set; }        
-    public object? DefaultValue { get; set; }
-}
-
-```
-
-###### 2.1.1.2 api parameter route info
-
-```c#
-public class ApiParameterRouteInfo
-{    
-    public IEnumerable<IRouteConstraint>? Constraints { get; set; }        
-    public object? DefaultValue { get; set; }        
-    public bool IsOptional { get; set; }
-}
-
-```
-
-###### 2.1.1.3 api request format
-
-```c#
-public class ApiRequestFormat
-{    
-    public IInputFormatter Formatter { get; set; } = default!;        
-    public string MediaType { get; set; } = default!;
-}
-
-```
-
-###### 2.1.1.4 api response type
-
-```c#
-public class ApiResponseType
-{    
-    public IList<ApiResponseFormat> ApiResponseFormats { get; set; } = 
-        new List<ApiResponseFormat>();        
-    public ModelMetadata? ModelMetadata { get; set; }        
-    public Type? Type { get; set; }        
-    public int StatusCode { get; set; }        
-    public bool IsDefaultResponse { get; set; }
-}
-
-```
-
-###### 2.1.1.5 api response format
-
-```c#
-public class ApiResponseFormat
-{
-    public IOutputFormatter Formatter { get; set; } = default!;        
-    public string MediaType { get; set; } = default!;
-}
-
-```
-
-##### 2.1.2 api description 扩展
-
-```c#
-public static class ApiDescriptionExtensions
-{    
-    public static T GetProperty<T>(this ApiDescription apiDescription)
-    {
-        if (apiDescription == null)
-        {
-            throw new ArgumentNullException(nameof(apiDescription));
-        }
-        
-        object value;
-        if (apiDescription.Properties.TryGetValue(typeof(T), out value))
-        {
-            return (T)value;
-        }
-        else
-        {
-            return default(T);
-        }
-    }
-        
-    public static void SetProperty<T>(this ApiDescription apiDescription, T value)
-    {
-        if (apiDescription == null)
-        {
-            throw new ArgumentNullException(nameof(apiDescription));
-        }        
-        if (value == null)
-        {
-            throw new ArgumentNullException(nameof(value));
-        }
-        
-        apiDescription.Properties[typeof(T)] = value;
-    }
-}
-
-```
-
-#### 2.2 api description provider 抽象
-
-##### 2.2.1 api description provider 接口
-
-```c#
-public interface IApiDescriptionProvider
-{    
-    int Order { get; }        
-    void OnProvidersExecuting(ApiDescriptionProviderContext context);        
-    void OnProvidersExecuted(ApiDescriptionProviderContext context);
-}
-
-```
-
-##### 2.2.2 api description provider context
-
-```c#
-public class ApiDescriptionProviderContext
-{
-    public IReadOnlyList<ActionDescriptor> Actions { get; }        
-    public IList<ApiDescription> Results { get; }
-    
-    public ApiDescriptionProviderContext(IReadOnlyList<ActionDescriptor> actions)
-    {
-        if (actions == null)
-        {
-            throw new ArgumentNullException(nameof(actions));
-        }
-        
-        Actions = actions;        
-        Results = new List<ApiDescription>();
-    }            
-}
-
-```
-
-#### 2.3 default api description provider
-
-```c#
-public class DefaultApiDescriptionProvider : IApiDescriptionProvider
-{
-    private readonly MvcOptions _mvcOptions;
-    private readonly ApiResponseTypeProvider _responseTypeProvider;
-    private readonly RouteOptions _routeOptions;
-    private readonly IInlineConstraintResolver _constraintResolver;
-    private readonly IModelMetadataProvider _modelMetadataProvider;
-    
-     /// <inheritdoc />
-    public int Order => -1000;    
-    
-    public DefaultApiDescriptionProvider(
-        IOptions<MvcOptions> optionsAccessor,
-        IInlineConstraintResolver constraintResolver,
-        IModelMetadataProvider modelMetadataProvider,
-        IActionResultTypeMapper mapper,
-        IOptions<RouteOptions> routeOptions)
-    {
-        _mvcOptions = optionsAccessor.Value;
-        _constraintResolver = constraintResolver;
-        _modelMetadataProvider = modelMetadataProvider;
-        _responseTypeProvider = 
-            new ApiResponseTypeProvider(
-            	modelMetadataProvider, 
-            	mapper, 
-            	_mvcOptions);
-        _routeOptions = routeOptions.Value;
-    }
-    
-           
-    
-    /// <inheritdoc />
-    public void OnProvidersExecuted(ApiDescriptionProviderContext context)
-    {
-    }
-                                                                                                                                                                                                                                                                        
-    }
-}
 
 ```
 
@@ -225,47 +21,7 @@ public class DefaultApiDescriptionProvider : IApiDescriptionProvider
 ```c#
 public class DefaultApiDescriptionProvider : IApiDescriptionProvider
 {
-    public void OnProvidersExecuting(ApiDescriptionProviderContext context)
-    {
-        if (context == null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
-        
-        /* 遍历 api description provider context actions 中，
-           controller action 类型（标记了 controller 属性？？） */ 
-        foreach (var action in context.Actions.OfType<ControllerActionDescriptor>())
-        {
-            // 如果 action 的 route info 标记了 suppress path matching，忽略            
-            if (action.AttributeRouteInfo != null && 
-                action.AttributeRouteInfo.SuppressPathMatching)
-            {
-                continue;
-            }
-            
-            /* a- 解析 http method */
-            // 获取 api description action data，            
-            var extensionData = action.GetProperty<ApiDescriptionActionData>();
-                                    
-            if (extensionData != null)
-            {
-                // 并从中获取 http methods，
-                var httpMethods = GetHttpMethods(action);
-                
-                // 创建 methods 对应的 result (api descriptioin)，
-            	// 注入 api descritpion provider context 的 result
-                foreach (var httpMethod in httpMethods)
-                {
-                    context.Results
-                        	/* b- 创建 api description */
-                           .Add(CreateApiDescription(
-                               		action, 
-		                            httpMethod, 
-        		                    extensionData.GroupName));
-                }
-            }
-        }
-    }     
+    
 }
 
 ```
@@ -285,128 +41,13 @@ public class ApiDescriptionActionData
 ###### 2.3.2.2 get http methods
 
 ```c#
-public class DefaultApiDescriptionProvider : IApiDescriptionProvider
-{
-    private IEnumerable<string> GetHttpMethods(ControllerActionDescriptor action)
-    {
-        // 如果标记了 action constraint
-        if (action.ActionConstraints != null && 
-            action.ActionConstraints.Count > 0)
-        {
-            // 获取 action constraint 中的 http method action constraint 的 http method
-            return action.ActionConstraints
-                		 .OfType<HttpMethodActionConstraint>()
-                		 .SelectMany(c => c.HttpMethods);
-        }
-        // 否则，即没有标记 action constraint
-        else
-        {
-            // 返回 empty
-            return new string[] { null };
-        }
-    }
-}
 
 ```
 
 ##### 2.3.3  b- 创建 api description
 
 ```c#
-public class DefaultApiDescriptionProvider : IApiDescriptionProvider
-{
-    private ApiDescription CreateApiDescription(
-        ControllerActionDescriptor action,
-        string httpMethod,
-        string groupName)
-    {
-        /* b1- 从 action 中解析 route template */
-        var parsedTemplate = ParseTemplate(action);
-        // 创建 api description -- 预结果
-        var apiDescription = new ApiDescription()
-        {
-            ActionDescriptor = action,
-            GroupName = groupName,
-            HttpMethod = httpMethod,
-            /* b2- 获取 relative path */
-            RelativePath = GetRelativePath(parsedTemplate),
-        };
-        
-        // 从 route template 中解析 template parameter（模板形参）
-        var templateParameters = 
-            parsedTemplate
-            	?.Parameters
-            	?.ToList() 
-            	?? new List<TemplatePart>();
-        /* b3- 创建 api parameter context */
-        var parameterContext = 
-            new ApiParameterContext(
-            		_modelMetadataProvider, 
-            		action, 
-	            	templateParameters);
-        
-        /* b4- 从 parameter context 中解析 parameter，*/        
-        foreach (var parameter in GetParameters(parameterContext))
-        {
-            // 将 parameter 注入 api description（预结果）
-            apiDescription.ParameterDescriptions.Add(parameter);
-        }
-        
-        /* b5- 解析 request metadata attribute */
-        var requestMetadataAttributes = GetRequestMetadataAttributes(action);
-        
-        /* 解析 api response type， */
-        var apiResponseTypes = _responseTypeProvider.GetApiResponseTypes(action);
-        foreach (var apiResponseType in apiResponseTypes)
-        {
-            // 将 api response type 注入 api description 的 support response types
-            apiDescription.SupportedResponseTypes.Add(apiResponseType);
-        }
-        
-        // It would be possible here to configure an action with multiple body parameters, 
-        // in which case you could end up with duplicate data.
-        if (apiDescription.ParameterDescriptions.Count > 0)
-        {
-            /* b6- 从 request metadata attribute 中解析 content type*/
-            var contentTypes = GetDeclaredContentTypes(requestMetadataAttributes);
-            
-            foreach (var parameter in apiDescription.ParameterDescriptions)
-            {
-                // 如果 parameter 来自 body，
-                if (parameter.Source == BindingSource.Body)
-                {
-                    /* b7- 解析 supported format */
-                    // For request body bound parameters, 
-                    // determine the content types supported by input formatters.
-                    var requestFormats = GetSupportedFormats(contentTypes, parameter.Type);
-                    foreach (var format in requestFormats)
-                    {
-                        apiDescription.SupportedRequestFormats.Add(format);
-                    }
-                }
-                // 如果 parameter 来自 formfile
-                else if (parameter.Source == BindingSource.FormFile)
-                {
-                    /* 创建 content type 对应的 api request format，
-                       注入 api descritption 的 supported request format 中 */
-                    // Add all declared media types 
-                    // since FormFiles do not get processed by formatters.
-                    foreach (var contentType in contentTypes)
-                    {
-                        apiDescription
-                            .SupportedRequestFormats
-                            .Add(new ApiRequestFormat
-                                 {
-                                     MediaType = contentType,                           
-                                 });
-                    }
-                }
-            }
-        }
-        
-        return apiDescription;
-    }
-}
-    
+
 ```
 
 ###### 2.3.3.1 b1- parse template
@@ -1123,41 +764,12 @@ public class DefaultApiDescriptionProvider : IApiDescriptionProvider
 ###### 2.3.1.1 api description group
 
 ```c#
-public class ApiDescriptionGroup
-{
-    public string GroupName { get; }            
-    public IReadOnlyList<ApiDescription> Items { get; }
-    
-    public ApiDescriptionGroup(string groupName, IReadOnlyList<ApiDescription> items)
-    {
-        GroupName = groupName;
-        Items = items;
-    }            
-}
 
 ```
 
 ###### 2.3.1.2 api description group collection
 
 ```c#
-public class ApiDescriptionGroupCollection
-{
-    public int Version { get; }    
-    public IReadOnlyList<ApiDescriptionGroup> Items { get; }
-    
-    public ApiDescriptionGroupCollection(
-        IReadOnlyList<ApiDescriptionGroup> items, 
-        int version)
-    {
-        if (items == null)
-        {
-            throw new ArgumentNullException(nameof(items));
-        }
-        
-        Items = items;
-        Version = version;
-    }                    
-}
 
 ```
 
@@ -1166,73 +778,12 @@ public class ApiDescriptionGroupCollection
 ###### 2.3.2.1 接口
 
 ```c#
-public interface IApiDescriptionGroupCollectionProvider
-{        
-    ApiDescriptionGroupCollection ApiDescriptionGroups { get; }
-}
 
 ```
 
 ###### 2.3.2.1 实现
 
 ```c#
-public class ApiDescriptionGroupCollectionProvider : IApiDescriptionGroupCollectionProvider
-{
-    private readonly IActionDescriptorCollectionProvider _actionDescriptorCollectionProvider;
-    private readonly IApiDescriptionProvider[] _apiDescriptionProviders;
-    
-    private ApiDescriptionGroupCollection _apiDescriptionGroups;
-    /// <inheritdoc />
-    public ApiDescriptionGroupCollection ApiDescriptionGroups
-    {
-        get
-        {
-            var actionDescriptors = _actionDescriptorCollectionProvider.ActionDescriptors;
-            if (_apiDescriptionGroups == null || 
-                _apiDescriptionGroups.Version != actionDescriptors.Version)
-            {
-                _apiDescriptionGroups = GetCollection(actionDescriptors);
-            }
-            
-            return _apiDescriptionGroups;
-        }
-    }
-    
-    private ApiDescriptionGroupCollection GetCollection(
-        ActionDescriptorCollection actionDescriptors)
-    {
-        var context = new ApiDescriptionProviderContext(actionDescriptors.Items);
-        
-        foreach (var provider in _apiDescriptionProviders)
-        {
-            provider.OnProvidersExecuting(context);
-        }
-        
-        for (var i = _apiDescriptionProviders.Length - 1; i >= 0; i--)
-        {
-            _apiDescriptionProviders[i].OnProvidersExecuted(context);
-        }
-        
-        var groups = 
-            context.Results
-            	   .GroupBy(d => d.GroupName)
-    	           .Select(g => new ApiDescriptionGroup(g.Key, g.ToArray()))
-	               .ToArray();
-        
-        return new ApiDescriptionGroupCollection(
-            		   groups, 
-            		   actionDescriptors.Version);
-    }
-        
-    public ApiDescriptionGroupCollectionProvider(
-        IActionDescriptorCollectionProvider actionDescriptorCollectionProvider,
-        IEnumerable<IApiDescriptionProvider> apiDescriptionProviders)
-    {
-        _actionDescriptorCollectionProvider = actionDescriptorCollectionProvider;
-        _apiDescriptionProviders = 
-            apiDescriptionProviders.OrderBy(item => item.Order).ToArray();
-    }                
-}
 
 ```
 
