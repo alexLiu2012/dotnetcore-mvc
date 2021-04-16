@@ -51,6 +51,35 @@ IoC 是现代程序设计框架都会采用的设计模式（其实不能称其�
 
 * ms service provider 使用的、实际解析服务的引擎
 
+##### 1.2.5 service scope
+
+服务都有归属的 scope，框架默认使用一个 scope，可以创建不同的scope
+web request 将创建新的 service scope
+
+----
+
+#### 1.3 how to use
+
+##### 1.3.1 注入服务
+
+通过`service collection`的相关扩展方法，向`service collection`注册不同的服务；注入服务时可以验证（去重）
+
+* try add，如果 di 已经包含 service type，不再注册 service type 的 impl（不运行、不报错）；
+* try add enumerable (transient)，如果 di 已经包含 service type 的某个 impl type（一般由 func 提供），不再注册 service type 的 impl（不运行、不报错）
+
+##### 1.3.2 解析服务
+
+由`service collection`构建`service provider`，再通过`service provider`的相关扩展方法，解析 service
+
+* get service，解析 service，如果不能解析，-> 返回 null；
+* get required service，解析 service，如果不能解析，-> 抛出异常
+
+##### 1.3.3 创建 service scope（解析 scoped service）
+
+`service provider.create service scope`
+
+----
+
 ### 2. details
 
 #### 2.1 service descriptor
