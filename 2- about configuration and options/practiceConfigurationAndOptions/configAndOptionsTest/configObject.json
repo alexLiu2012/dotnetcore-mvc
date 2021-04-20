@@ -1,0 +1,17 @@
+{
+  "KeyInt": 23,
+  "Keya": "valuea",
+  "Keyb": "valueb",
+  "Keyc": "valuec",
+
+  "SubList": [
+    "haha",
+    "hehe"
+  ],
+
+  "SubDictionary": {
+    "SubKeya": "SubValuea",
+    "SubKeyb": "SubValueb",
+    "SubKeyc": "SubValuec"
+  }
+}

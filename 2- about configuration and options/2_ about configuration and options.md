@@ -4,52 +4,55 @@
 
 ### 1. about
 
-#### 1.1 configuration 
+#### 1.1 summary
 
-`IConfiguration`是 .net core 框架提供的、读取外部配置的信息的抽象，是一个kv pair 的集合（字典），扁平化了数据源（用“：”分隔层级关系）
+.net core 框架提供了对外部配置信息读取操作的抽象`IConfiguration`。框架从不同配置源读取配置信息，将其保存在一个 kv pair 的集合（字典）中，扁平化了数据源（用“：”分隔层级关系），并由`IConfiguration`统一读取。
 
-##### 1.1.1 注入 configuration（源）
+`options`是 .net core 提供的对配置对象的强类型封装，它可以通过 configuration 获取源数据，然后 bind 到具体类型
 
-使用`service  collection`的扩展方法添加配置源（数据源）
+#### 1.2 how desgined
 
-* add memory
-* add command line
-* add environment
-* add user secret
-* add ini / json / xml
+##### 1.2.1 configuration
 
-##### 1.1.2 （直接）使用配置数据
+* `IConfiguration` 是框架对上层服务提供配置信息的统一接口，采用组合模式设计，`IConfigurationRoot`和`IConfigurationSection`是其派生接口
+* `ConfigurationBuilder`是 configuration 的构建器，通过向其注入不同的 configuration source 增加配置源，最终构建为 configuration
+* `ConfigurationSource`是 configuration 的配置（提供）源，它内部会使用 configuration provider 负责具体提供配置信息。一个 configuration source 一般对应一个 configuration provider，使用 configuration source 可以提供其他必须的元素（configuration provider）的超集。
+* services 扩展方法注入配置源
+  * add memory collection
+  * add command line
+  * add environment virables
+  * add user secret
+  * add ini / json / xml
 
-使用`IConfiguration`接口的`get`方法，或者直接访问字典[]
+##### 1.2.2 options
 
-##### 1.1.3 绑定到 object
+###### 1.2.2.1 options factory
 
-使用`configuration binder`绑定 configuration 到 object 或者强类型的 TObject
+创建强类型配置 toptions 的工厂方法，通过3个扩展接口配置 toptions
 
-#### 1.2 options
+* IConfigureOptions，用于 configure（配置）options
+* IPostConfigureOptions，用于 post configure（后配置）options
+* IValidateOptions，用于 validate（验证）options
 
-强类型的配置封装
+###### 1.2.2.2 options 接口
 
-##### 1.2.1 注入 options
+IOptions 接口向上层应用提供服务，除此以外，框架还提供了`IOptionsMonitor`接口，可以定义 on change listener 监听 options 绑定来源的变化；`IOptionsSnapshot`自动追踪更新后的 options（一直是最新的，transient，不能用于 singleton、scoped）
 
-###### 1.2.1.1 使用`service collection`的扩展方法（直接）添加 options
+上述2个接口的实现在内部使用 options factory 创建 options<T>，并缓存创建的 options，change token 用于触发更新 options（重新创建）
 
-添加时注入了 options 的 action，用于配置 options 本身
+###### 1.2.2.3 options builder
 
-* add options（不常用）
-* configure（常用）
-* post configure
-* validate data annotation
+向 di 注入上述3个扩展接口，
 
-###### 1.2.1.2 使用 configuration 绑定得到 options
+###### 1.2.2.3 options service
 
-添加时注入了 configuration，从 configuration 绑定到 options 实例
+* add options 用于注册 options 必须的服务，例如 IOptions<> 等；add options <T> 在 add options 基础上注入 options builder<T>
+* configure<t> 方法、post configure <T> 方法注册 IConfigureOptions、IPostConfigureOptions 等接口
 
-##### 1.2.2 使用 options
+#### 1.3 how to use
 
-* `IOptions`（常用的）
-* `IOptionsMonitor`（可以注入 changed listener，监听 options 源的变化；options 由 options factory 创建，被缓存）
-* `IOptionsSnapshot`（实时的，transient；options 由 options factory 创建，被缓存）
+* 使用 options factory 直接创建 toptions  -- 不常用
+* 使用 di 解析 toptions（注入后使用）-- 常用
 
 ### 2. configuration
 
@@ -711,6 +714,7 @@ public static class ConfigurationBinder
     {
         error = null;
         result = null;
+        
         if (type == typeof(object))
         {
             result = value;
@@ -803,9 +807,9 @@ public static class ConfigurationBinder
 {
     public static T Get<T>(this IConfiguration configuration) => configuration.Get<T>(_ => { });
         
-    public static T Get<T>
-        (this IConfiguration configuration, 
-         Action<BinderOptions> configureOptions)
+    public static T Get<T>(
+        this IConfiguration configuration, 
+        Action<BinderOptions> configureOptions)
     {
         if (configuration == null)
         {
@@ -979,9 +983,12 @@ public static class ConfigurationBinder
             return convertedValue;
         }
         
-        // 如果 config value 不为 null，（即 当前 configuration 是 configuration section 且有 value）
+        //（由上，config value 为 null，即当前 configuration section 没有 value -> 创建 value，
+        //  或者 config value 不能 convert）
+        
+        // 如果 config 不为 null
         if (config != null && 
-            // （由上，不能 convert），即 configuration section 包含嵌套子节点
+            // 且 config 由 children，即 configuration 包含嵌套子节点
             config.GetChildren().Any())
         {
             // 如果 instance（结果）为 null，创建并 bind
@@ -3957,49 +3964,9 @@ internal sealed class XmlConfigurationElementTextContent
 
 ### 4. options
 
-#### 4.1 options
+#### 4.1 t options
 
-##### 4.1.1 options
-
-```c#
-public interface IOptions<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] out TOptions> where TOptions : class
-{   
-    TOptions Value { get; }
-}
-
-```
-
-###### 4.1.1.1 unnamed options manager
-
-```c#
-internal sealed class UnnamedOptionsManager<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> :	IOptions<TOptions> where TOptions : class
-{
-    private readonly IOptionsFactory<TOptions> _factory;
-    private volatile object _syncObj;
-    
-    private volatile TOptions _value;            
-    public TOptions Value
-    {
-        get
-        {
-            if (_value is TOptions value)
-            {
-                return value;
-            }
-            
-            lock (_syncObj ?? Interlocked.CompareExchange(ref _syncObj, new object(), null) ?? _syncObj)
-            {
-                return _value ??= _factory.Create(Options.DefaultName);
-            }
-        }
-    }
-    
-    public UnnamedOptionsManager(IOptionsFactory<TOptions> factory) => _factory = factory;
-}
-
-```
-
-##### 4.1.2 configure options
+##### 4.1.1 configure options
 
 ```c#
 public interface IConfigureOptions<in TOptions> where TOptions : class
@@ -4009,7 +3976,7 @@ public interface IConfigureOptions<in TOptions> where TOptions : class
 
 ```
 
-###### 4.1.2.1 configure options
+###### 4.1.1.1 configure options（实现）
 
 ```c#
 public class ConfigureOptions<TOptions> : IConfigureOptions<TOptions> where TOptions : class
@@ -4034,14 +4001,16 @@ public class ConfigureOptions<TOptions> : IConfigureOptions<TOptions> where TOpt
 
 ```
 
-###### 4.1.2.2 configure named options
+###### 4.1.1.2 configure named options
 
 ```c#
+// 接口
 public interface IConfigureNamedOptions<in TOptions> : IConfigureOptions<TOptions> where TOptions : class
 {    
     void Configure(string name, TOptions options);
 }
 
+// 实现
 public class ConfigureNamedOptions<TOptions> : IConfigureNamedOptions<TOptions> where TOptions : class
 {
     public string Name { get; }        
@@ -4072,9 +4041,10 @@ public class ConfigureNamedOptions<TOptions> : IConfigureNamedOptions<TOptions> 
 
 ```
 
-###### 4.1.2.3 configure named options with dependence
+###### 4.1.1.3 configure named options with dependencies
 
 ```c#
+// 1 dep
 public class ConfigureNamedOptions<TOptions, TDep> : IConfigureNamedOptions<TOptions> 
     where TOptions : class 
     where TDep : class
@@ -4110,7 +4080,7 @@ public class ConfigureNamedOptions<TOptions, TDep> : IConfigureNamedOptions<TOpt
     }            
 }
 
-   
+// 2 dep   
 public class ConfigureNamedOptions<TOptions, TDep1, TDep2> : IConfigureNamedOptions<TOptions>    
     where TOptions : class    
     where TDep1 : class            
@@ -4150,8 +4120,12 @@ public class ConfigureNamedOptions<TOptions, TDep1, TDep2> : IConfigureNamedOpti
     }        
 }
 
-    
-public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3> : IConfigureNamedOptions<TOptions>        where TOptions : class        where TDep1 : class        where TDep2 : class        where TDep3 : class
+// 3 dep    
+public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3> : IConfigureNamedOptions<TOptions>        
+    where TOptions : class       
+    where TDep1 : class   
+    where TDep2 : class 
+    where TDep3 : class
 {
     public string Name { get; }        
     public Action<TOptions, TDep1, TDep2, TDep3> Action { get; }    
@@ -4190,7 +4164,7 @@ public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3> : IConfigureNa
     }            
 }
 
-   
+// 4 dep   
 public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3, TDep4> : IConfigureNamedOptions<TOptions>        
     where TOptions : class    
     where TDep1 : class        
@@ -4238,7 +4212,7 @@ public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3, TDep4> : IConf
     }        
 }
 
-   
+// 5 dep   
 public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> : IConfigureNamedOptions<TOptions>    
     where TOptions : class        
     where TDep1 : class            
@@ -4292,7 +4266,7 @@ public class ConfigureNamedOptions<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> 
 
 ```
 
-##### 4.1.3 post configure options
+##### 4.1.2 post configure options
 
 ```c#
 public interface IPostConfigureOptions<in TOptions> where TOptions : class
@@ -4302,7 +4276,7 @@ public interface IPostConfigureOptions<in TOptions> where TOptions : class
 
 ```
 
-###### 4.1.3.1 post configure (named) options
+###### 4.1.2.1 post configure (named) options（实现）
 
 ```c#
 public class PostConfigureOptions<TOptions> : IPostConfigureOptions<TOptions> where TOptions : class
@@ -4333,9 +4307,10 @@ public class PostConfigureOptions<TOptions> : IPostConfigureOptions<TOptions> wh
 
 ```
 
-###### 4.1.3.2 post configure (named) options with dependence
+###### 4.1.2.2 post configure (named) options with dependencies
 
 ```c#
+// 1 dep
 public class PostConfigureOptions<TOptions, TDep> : IPostConfigureOptions<TOptions>    
     where TOptions : class        
     where TDep : class
@@ -4368,8 +4343,11 @@ public class PostConfigureOptions<TOptions, TDep> : IPostConfigureOptions<TOptio
     }                
 }
 
-  
-public class PostConfigureOptions<TOptions, TDep1, TDep2> : IPostConfigureOptions<TOptions>        where TOptions : class        where TDep1 : class        where TDep2 : class
+// 2 dep  
+public class PostConfigureOptions<TOptions, TDep1, TDep2> : IPostConfigureOptions<TOptions>     
+    where TOptions : class     
+    where TDep1 : class     
+    where TDep2 : class
 {
     public string Name { get; }    
     public Action<TOptions, TDep1, TDep2> Action { get; }    
@@ -4405,7 +4383,7 @@ public class PostConfigureOptions<TOptions, TDep1, TDep2> : IPostConfigureOption
     }            
 }
 
-    
+// 3 dep    
 public class PostConfigureOptions<TOptions, TDep1, TDep2, TDep3> : IPostConfigureOptions<TOptions>        
     where TOptions : class        
     where TDep1 : class        
@@ -4449,7 +4427,7 @@ public class PostConfigureOptions<TOptions, TDep1, TDep2, TDep3> : IPostConfigur
     }            
 }
 
-    
+// 4 dep    
 public class PostConfigureOptions<TOptions, TDep1, TDep2, TDep3, TDep4> : IPostConfigureOptions<TOptions>        
     where TOptions : class        
     where TDep1 : class        
@@ -4497,7 +4475,7 @@ public class PostConfigureOptions<TOptions, TDep1, TDep2, TDep3, TDep4> : IPostC
     }            
 }
 
-
+// 5 dep
 public class PostConfigureOptions<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> : IPostConfigureOptions<TOptions>    
     where TOptions : class        
     where TDep1 : class        
@@ -4551,7 +4529,7 @@ public class PostConfigureOptions<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> :
 
 ```
 
-##### 4.1.4 validate options
+##### 4.1.3 validate options
 
 ```c#
 public interface IValidateOptions<TOptions> where TOptions : class
@@ -4561,7 +4539,7 @@ public interface IValidateOptions<TOptions> where TOptions : class
 
 ```
 
-###### 4.1.4.1 validate options result
+###### 4.1.3.1 validate options result
 
 ```c#
 public class ValidateOptionsResult
@@ -4592,7 +4570,7 @@ public class ValidateOptionsResult
 
 ```
 
-###### 4.1.4.2 validate (named) options
+###### 4.1.3.2 validate (named) options
 
 ```c#
 public class ValidateOptions<TOptions> : IValidateOptions<TOptions> where TOptions : class
@@ -4630,9 +4608,10 @@ public class ValidateOptions<TOptions> : IValidateOptions<TOptions> where TOptio
 
 ```
 
-###### 4.1.4.3 validate (named) options with dependence
+###### 4.1.3.3 validate (named) options with dependencies
 
 ```c#
+// 1 dep
 public class ValidateOptions<TOptions, TDep> : IValidateOptions<TOptions> where TOptions : class
 {
     public string Name { get; }
@@ -4640,7 +4619,11 @@ public class ValidateOptions<TOptions, TDep> : IValidateOptions<TOptions> where 
     public string FailureMessage { get; }    
     public TDep Dependency { get; }
     
-    public ValidateOptions(string name, TDep dependency, Func<TOptions, TDep, bool> validation, string failureMessage)
+    public ValidateOptions(
+        string name, 
+        TDep dependency, 
+        Func<TOptions, TDep, bool> validation, 
+        string failureMessage)
     {
         Name = name;
         Validation = validation;
@@ -4664,7 +4647,8 @@ public class ValidateOptions<TOptions, TDep> : IValidateOptions<TOptions> where 
         return ValidateOptionsResult.Skip;
     }
 }
-   
+
+// 2 dep
 public class ValidateOptions<TOptions, TDep1, TDep2> : IValidateOptions<TOptions> where TOptions : class
 {
     public string Name { get; }    
@@ -4673,7 +4657,12 @@ public class ValidateOptions<TOptions, TDep1, TDep2> : IValidateOptions<TOptions
     public TDep1 Dependency1 { get; }    
     public TDep2 Dependency2 { get; }
     
-    public ValidateOptions(string name, TDep1 dependency1, TDep2 dependency2, Func<TOptions, TDep1, TDep2, bool> validation, string failureMessage)
+    public ValidateOptions(
+        string name, 
+        TDep1 dependency1, 
+        TDep2 dependency2, 
+        Func<TOptions, TDep1, TDep2, bool> validation, 
+        string failureMessage)
     {
         Name = name;
         Validation = validation;
@@ -4681,8 +4670,7 @@ public class ValidateOptions<TOptions, TDep1, TDep2> : IValidateOptions<TOptions
         Dependency1 = dependency1;
         Dependency2 = dependency2;
     }
-    
-    
+        
     public ValidateOptionsResult Validate(string name, TOptions options)
     {
         // null name is used to configure all named options
@@ -4700,6 +4688,7 @@ public class ValidateOptions<TOptions, TDep1, TDep2> : IValidateOptions<TOptions
     }
 }
 
+// 3 dep
 public class ValidateOptions<TOptions, TDep1, TDep2, TDep3> : IValidateOptions<TOptions> where TOptions : class
 {
     public string Name { get; }        
@@ -4742,7 +4731,7 @@ public class ValidateOptions<TOptions, TDep1, TDep2, TDep3> : IValidateOptions<T
     }
 }
 
-
+// 4 dep
 public class ValidateOptions<TOptions, TDep1, TDep2, TDep3, TDep4> : IValidateOptions<TOptions> where TOptions : class
 {
     public string Name { get; }        
@@ -4787,7 +4776,7 @@ public class ValidateOptions<TOptions, TDep1, TDep2, TDep3, TDep4> : IValidateOp
     }
 }
 
-
+// 5 dep
 public class ValidateOptions<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> : IValidateOptions<TOptions> where TOptions : class
 {
     public string Name { get; }        
@@ -4837,7 +4826,7 @@ public class ValidateOptions<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> : IVal
 
 ```
 
-##### 4.1.5 options factory
+##### 4.1.4 options factory
 
 ```c#
 public interface IOptionsFactory<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> where TOptions : class
@@ -4847,7 +4836,7 @@ public interface IOptionsFactory<[DynamicallyAccessedMembers(Options.Dynamically
 
 ```
 
-###### 4.1.5.1 options factory
+###### 4.1.4.1 options factory（实现）
 
 ```c#
 public class OptionsFactory<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> :        
@@ -4930,24 +4919,23 @@ public class OptionsFactory<[DynamicallyAccessedMembers(Options.DynamicallyAcces
 
 ```
 
-##### 4.1.5 options（静态类）
+##### 4.1.5 options 静态类
 
 ```c#
 public static class Options
-    {
+{    
+    internal const DynamicallyAccessedMemberTypes DynamicallyAccessedMembers = 
+        DynamicallyAccessedMemberTypes.PublicParameterlessConstructor;
+    
+    public static readonly string DefaultName = string.Empty;
         
-        internal const DynamicallyAccessedMemberTypes DynamicallyAccessedMembers = DynamicallyAccessedMemberTypes.PublicParameterlessConstructor;
-
-       
-        public static readonly string DefaultName = string.Empty;
-
-       
-        public static IOptions<TOptions> Create<[DynamicallyAccessedMembers(DynamicallyAccessedMembers)] TOptions>(TOptions options)
-            where TOptions : class
-        {
-            return new OptionsWrapper<TOptions>(options);
-        }
+    public static IOptions<TOptions> Create<[DynamicallyAccessedMembers(DynamicallyAccessedMembers)] TOptions>(TOptions options)    
+        where TOptions : class
+    {
+        return new OptionsWrapper<TOptions>(options);
     }
+}
+
 ```
 
 ###### 4.1.5.1 options wrapper
@@ -4966,9 +4954,50 @@ public class OptionsWrapper<[DynamicallyAccessedMembers(Options.DynamicallyAcces
 
 ```
 
-#### 4.2 options monitor
+#### 4.2 i options
 
-##### 4.2.1 接口
+##### 4.2.1 options
+
+```c#
+public interface IOptions<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] out TOptions> where TOptions : class
+{   
+    TOptions Value { get; }
+}
+
+```
+
+###### 4.2.1.1 unnamed options manager
+
+```c#
+internal sealed class UnnamedOptionsManager<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> :		
+	IOptions<TOptions> where TOptions : class
+{
+    private readonly IOptionsFactory<TOptions> _factory;
+    private volatile object _syncObj;
+    
+    private volatile TOptions _value;            
+    public TOptions Value
+    {
+        get
+        {
+            if (_value is TOptions value)
+            {
+                return value;
+            }
+            
+            lock (_syncObj ?? Interlocked.CompareExchange(ref _syncObj, new object(), null) ?? _syncObj)
+            {
+                return _value ??= _factory.Create(Options.DefaultName);
+            }
+        }
+    }
+    
+    public UnnamedOptionsManager(IOptionsFactory<TOptions> factory) => _factory = factory;
+}
+
+```
+
+##### 4.2.2 options monitor
 
 ```c#
 public interface IOptionsMonitor<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] out TOptions>
@@ -4981,7 +5010,7 @@ public interface IOptionsMonitor<[DynamicallyAccessedMembers(Options.Dynamically
 
 ```
 
-##### 4.2.2 options monitor
+###### 4.2.2.1 opitons monitor（实现）
 
 ```c#
 public class OptionsMonitor<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> :  
@@ -5085,7 +5114,7 @@ public class OptionsMonitor<[DynamicallyAccessedMembers(Options.DynamicallyAcces
 
 ```
 
-###### 4.2.2.1 options monitor cache 接口
+###### 4.2.2.2 options monitor cache
 
 ```c#
 public interface IOptionsMonitorCache<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions>    
@@ -5099,7 +5128,7 @@ public interface IOptionsMonitorCache<[DynamicallyAccessedMembers(Options.Dynami
 
 ```
 
-###### 4.2.2.2 options change token source 接口
+###### 4.2.2.3 options change token source
 
 ```c#
 public interface IOptionsChangeTokenSource<out TOptions>
@@ -5110,7 +5139,7 @@ public interface IOptionsChangeTokenSource<out TOptions>
 
 ```
 
-###### 4.2.2.3 扩展方法 - on change
+###### 4.2.2.4 扩展方法 - on change
 
 ```c#
 public static class OptionsMonitorExtensions
@@ -5123,9 +5152,7 @@ public static class OptionsMonitorExtensions
 
 ```
 
-#### 4.3 options snapshot
-
-##### 4.3.1 接口
+##### 4.2.3 options snapshot
 
 ```c#
 public interface IOptionsSnapshot<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] out TOptions> :      
@@ -5136,7 +5163,7 @@ public interface IOptionsSnapshot<[DynamicallyAccessedMembers(Options.Dynamicall
 
 ```
 
-##### 4.3.2 options manager
+###### 4.2.3.1 options manager（实现）
 
 ```c#
 public class OptionsManager<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> :        
@@ -5177,7 +5204,7 @@ public class OptionsManager<[DynamicallyAccessedMembers(Options.DynamicallyAcces
 
 ```
 
-###### 4.3.2.1 options cache
+###### 4.2.3.2 options cache
 
 ```c#
 public class OptionsCache<[DynamicallyAccessedMembers(Options.DynamicallyAccessedMembers)] TOptions> :   
@@ -5249,11 +5276,7 @@ public class OptionsCache<[DynamicallyAccessedMembers(Options.DynamicallyAccesse
 
 ```
 
-
-
-#### 4.4 options builder & service
-
-##### 4.4.1 options builder
+#### 4.3 options builder
 
 ```c#
 public class OptionsBuilder<TOptions> where TOptions : class
@@ -5277,12 +5300,13 @@ public class OptionsBuilder<TOptions> where TOptions : class
 
 ```
 
-###### 4.4.1.1 configure (options)
+##### 4.3.1 configure options
+
+###### 4.3.1.1 configure options
 
 ```c#
 public class OptionsBuilder<TOptions> where TOptions : class
-{
-    /* configure options */
+{    
     public virtual OptionsBuilder<TOptions> Configure(Action<TOptions> configureOptions)
     {
         if (configureOptions == null)
@@ -5290,6 +5314,7 @@ public class OptionsBuilder<TOptions> where TOptions : class
             throw new ArgumentNullException(nameof(configureOptions));
         }
         
+        // 注入 configure options t
         Services.AddSingleton<IConfigureOptions<TOptions>>(
             new ConfigureNamedOptions<TOptions>(
                 Name, 
@@ -5297,8 +5322,18 @@ public class OptionsBuilder<TOptions> where TOptions : class
         
         return this;
     }
+}
 
-    /* configure options with dependence */    
+```
+
+###### 4.3.1.2 configure options with dependencies
+
+```c#
+public class OptionsBuilder<TOptions> where TOptions : class
+{
+    // 注入 configure options t with dependencies
+    
+    // 1 dep
     public virtual OptionsBuilder<TOptions> Configure<TDep>(
         Action<TOptions, TDep> configureOptions) 
         	where TDep : class
@@ -5316,7 +5351,8 @@ public class OptionsBuilder<TOptions> where TOptions : class
         
         return this;
     }
-            
+     
+    // 2 dep
     public virtual OptionsBuilder<TOptions> Configure<TDep1, TDep2>(
         Action<TOptions, TDep1, TDep2> configureOptions)            
         	where TDep1 : class            
@@ -5336,7 +5372,8 @@ public class OptionsBuilder<TOptions> where TOptions : class
         
         return this;
     }
-        
+       
+    // 3 dep
     public virtual OptionsBuilder<TOptions> Configure<TDep1, TDep2, TDep3>(
         Action<TOptions, TDep1, TDep2, TDep3> configureOptions)            
         	where TDep1 : class            
@@ -5358,7 +5395,8 @@ public class OptionsBuilder<TOptions> where TOptions : class
         
         return this;
     }
-        
+     
+    // 4 dep
     public virtual OptionsBuilder<TOptions> Configure<TDep1, TDep2, TDep3, TDep4>(
         Action<TOptions, TDep1, TDep2, TDep3, TDep4> configureOptions)       
         	where TDep1 : class        
@@ -5382,7 +5420,8 @@ public class OptionsBuilder<TOptions> where TOptions : class
         
         return this;
     }
-        
+      
+    // 5 dep
     public virtual OptionsBuilder<TOptions> Configure<TDep1, TDep2, TDep3, TDep4, TDep5>(
         Action<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> configureOptions)         
         	where TDep1 : class         
@@ -5412,12 +5451,13 @@ public class OptionsBuilder<TOptions> where TOptions : class
 
 ```
 
-###### 4.4.1.2 post configure (options)
+##### 4.3.2 post configure options
+
+###### 4.3.2.1 post configure options
 
 ```c#
 public class OptionsBuilder<TOptions> where TOptions : class
-{         
-    /* post configure */
+{            
     public virtual OptionsBuilder<TOptions> PostConfigure(Action<TOptions> configureOptions)
     {
         if (configureOptions == null)
@@ -5425,13 +5465,24 @@ public class OptionsBuilder<TOptions> where TOptions : class
             throw new ArgumentNullException(nameof(configureOptions));
         }
         
+        // 注入 post configure options t
         Services.AddSingleton<IPostConfigureOptions<TOptions>>(
             new PostConfigureOptions<TOptions>(Name, configureOptions));
         
         return this;
-    }
+    }    
+}
 
-    /* post configure with dependence */
+```
+
+###### 4.3.2.2 post configure options with dependencies
+
+```c#
+public class OptionsBuilder<TOptions> where TOptions : class
+{         
+    // 注入 post configure options t with dependencies
+    
+    // 1 dep   
     public virtual OptionsBuilder<TOptions> PostConfigure<TDep>(
         Action<TOptions, TDep> configureOptions) 
         	where TDep : class
@@ -5450,8 +5501,11 @@ public class OptionsBuilder<TOptions> where TOptions : class
         return this;
     }
         
+    // 2 dep
     public virtual OptionsBuilder<TOptions> PostConfigure<TDep1, TDep2>(
-        Action<TOptions, TDep1, TDep2> configureOptions)            where TDep1 : class            where TDep2 : class
+        Action<TOptions, TDep1, TDep2> configureOptions)           
+        	where TDep1 : class 
+          	where TDep2 : class
     {
         if (configureOptions == null)
         {
@@ -5468,6 +5522,7 @@ public class OptionsBuilder<TOptions> where TOptions : class
         return this;
     }
         
+    // 3 dep
     public virtual OptionsBuilder<TOptions> PostConfigure<TDep1, TDep2, TDep3>(
         Action<TOptions, TDep1, TDep2, TDep3> configureOptions)            
         	where TDep1 : class     
@@ -5489,7 +5544,8 @@ public class OptionsBuilder<TOptions> where TOptions : class
         
         return this;
     }
-            
+       
+    // 4 dep
     public virtual OptionsBuilder<TOptions> PostConfigure<TDep1, TDep2, TDep3, TDep4>(
         Action<TOptions, TDep1, TDep2, TDep3, TDep4> configureOptions)        
         	where TDep1 : class
@@ -5514,6 +5570,7 @@ public class OptionsBuilder<TOptions> where TOptions : class
         return this;
     }
         
+    // 5 dep
     public virtual OptionsBuilder<TOptions> PostConfigure<TDep1, TDep2, TDep3, TDep4, TDep5>(
         Action<TOptions, TDep1, TDep2, TDep3, TDep4, TDep5> configureOptions)         
 	        where TDep1 : class        
@@ -5543,12 +5600,14 @@ public class OptionsBuilder<TOptions> where TOptions : class
 
 ```
 
-###### 4.4.1.3 validate (options)
+##### 4.3.3 validate configure options
+
+###### 4.3.3.1 validate configure options
 
 ```c#
 public class OptionsBuilder<TOptions> where TOptions : class
 {   
-    /* validate options */
+    // 注入 validate options t
     public virtual OptionsBuilder<TOptions> Validate(Func<TOptions, bool> validation) => 
         Validate(validation: validation, failureMessage: DefaultValidationFailureMessage);
         
@@ -5562,9 +5621,17 @@ public class OptionsBuilder<TOptions> where TOptions : class
         Services.AddSingleton<IValidateOptions<TOptions>>(
             new ValidateOptions<TOptions>(Name, validation, failureMessage));
         return this;
-    }
-    
-    /* validate options with dependence */
+    }        
+}
+
+```
+
+###### 4.3.3.2 validate configure options with dependencies
+
+```c#
+public class OptionsBuilder<TOptions> where TOptions : class
+{           
+    // 注入 validate options t with dependencies
     
     // 1 dep
     public virtual OptionsBuilder<TOptions> Validate<TDep>(
@@ -5709,7 +5776,9 @@ public class OptionsBuilder<TOptions> where TOptions : class
 
 ```
 
-##### 4.4.2 options services
+#### 4.4 options services
+
+##### 4.4.1 add options
 
 ```c#
 public static class OptionsServiceCollectionExtensions
@@ -5739,7 +5808,7 @@ public static class OptionsServiceCollectionExtensions
 
 ```
 
-###### 4.4.2.1 add options of T
+##### 4.4.2 add options of t
 
 ```c#
 public static class OptionsServiceCollectionExtensions
@@ -5765,7 +5834,9 @@ public static class OptionsServiceCollectionExtensions
 
 ```
 
-###### 4.4.2.2 configure options of T
+##### 4.4.3 configure options
+
+###### 4.4.3.1 configure options of t
 
 ```c#
 public static class OptionsServiceCollectionExtensions
@@ -5808,7 +5879,7 @@ public static class OptionsServiceCollectionExtensions
 
 ```
 
-###### 4.4.2.3 configure options by type
+###### 4.4.3.2 configure options by type
 
 ```c#
 public static class OptionsServiceCollectionExtensions
@@ -5826,7 +5897,7 @@ public static class OptionsServiceCollectionExtensions
         
         bool added = false;
         
-        // 遍历解析到的 TOptions
+        // 遍历解析到的 TOptions 配置接口，即 IConfigureOptions、IPostConfigureOptions、IValidateOptions
         foreach (Type serviceType in FindConfigurationServices(configureType))
         {
             // 注册 TOptions，对应的 instance type 就是 configure type
@@ -5842,6 +5913,7 @@ public static class OptionsServiceCollectionExtensions
         return services;
     }
     
+    /* 解析 configuration service 实现的 toptions 配置接口 */
     private static IEnumerable<Type> FindConfigurationServices(Type type)
     {
         // 遍历 type 的 interface
@@ -5872,17 +5944,21 @@ public static class OptionsServiceCollectionExtensions
 
 ```
 
-###### 4.4.2.4 configure options by instance
+###### 4.4.3.3 configure options by instance
 
 ```c#
 public static class OptionsServiceCollectionExtensions
 { 
     public static IServiceCollection ConfigureOptions(this IServiceCollection services, object configureInstance)
     {
+        // 注入 options 服务
         services.AddOptions();
+        // 解析 configure type
         Type configureType = configureInstance.GetType();
         
         bool added = false;
+        
+        // 遍历 configure type 中 toptions 配置接口，即 IConfigureOptions、IPostConfigureOptions、IValidateOptions
         foreach (Type serviceType in FindConfigurationServices(configureType))
         {
             services.AddSingleton(serviceType, configureInstance);
@@ -5900,7 +5976,7 @@ public static class OptionsServiceCollectionExtensions
 
 ```
 
-###### 4.4.2.3 post configure
+##### 4.4.4 post configure options
 
 ```c#
 public static class OptionsServiceCollectionExtensions
@@ -5940,9 +6016,9 @@ public static class OptionsServiceCollectionExtensions
 
 ```
 
-#### 4.4 options with annotation
+#### 4.5 options with annotation
 
-##### 4.4.1 data annotation validate options
+##### 4.5.1 data annotation validate options
 
 ```c#
 public class DataAnnotationValidateOptions<TOptions> : IValidateOptions<TOptions> where TOptions : class
@@ -5960,6 +6036,8 @@ public class DataAnnotationValidateOptions<TOptions> : IValidateOptions<TOptions
         if (Name == null || name == Name)
         {
             var validationResults = new List<ValidationResult>();
+            
+            // 使用 (data annotation) Validator 验证
             if (Validator.TryValidateObject(
                 	options,
                 	new ValidationContext(options, serviceProvider: null, items: null),
@@ -5985,7 +6063,7 @@ public class DataAnnotationValidateOptions<TOptions> : IValidateOptions<TOptions
 
 ```
 
-##### 4.4.2 options builder data annotation extension
+##### 4.5.2 options builder data annotation extension
 
 ```c#
 public static class OptionsBuilderDataAnnotationsExtensions
@@ -6002,14 +6080,15 @@ public static class OptionsBuilderDataAnnotationsExtensions
 
 ```
 
-#### 4.5 options from configuration
+#### 4.6 options with configuration
 
-##### 4.5.1 configure options ext
+##### 4.6.1 configure options with configuration
 
-###### 4.5.1.1 configure from configuration options
+###### 4.6.1.1 configure from configuration options
 
 ```c#
-public class ConfigureFromConfigurationOptions<TOptions> : ConfigureOptions<TOptions> where TOptions : class
+public class ConfigureFromConfigurationOptions<TOptions> : 
+	ConfigureOptions<TOptions> where TOptions : class
 {    
     public ConfigureFromConfigurationOptions(IConfiguration config) : 
     	base(options => ConfigurationBinder.Bind(config, options))
@@ -6023,7 +6102,7 @@ public class ConfigureFromConfigurationOptions<TOptions> : ConfigureOptions<TOpt
 
 ```
 
-###### 4.5.1.2 named configure from configuration opitons
+###### 4.6.1.2 named configure from configuration opitons
 
 ```c#
 public class NamedConfigureFromConfigurationOptions<TOptions> : 
@@ -6055,7 +6134,7 @@ public class NamedConfigureFromConfigurationOptions<TOptions> :
 
 ```
 
-##### 4.5.2 configuration change token
+##### 4.6.2 configuration change token
 
 ```c#
 public class ConfigurationChangeTokenSource<TOptions> : IOptionsChangeTokenSource<TOptions>
@@ -6088,7 +6167,7 @@ public class ConfigurationChangeTokenSource<TOptions> : IOptionsChangeTokenSourc
 
 ```
 
-##### 4.5.3 option builder configuration extensions
+##### 4.6.3 option builder configuration extensions
 
 ```c#
 public static class OptionsBuilderConfigurationExtensions
@@ -6146,7 +6225,7 @@ public static class OptionsBuilderConfigurationExtensions
 
 ```
 
-##### 4.5.4 options server configuration extensions
+##### 4.6.4 options server configuration extensions
 
 ```c#
 public static class OptionsConfigurationServiceCollectionExtensions
@@ -6189,6 +6268,7 @@ public static class OptionsConfigurationServiceCollectionExtensions
         
         // 注册 options 服务
         services.AddOptions();
+                
         // 注入 configuration change token
         services.AddSingleton<IOptionsChangeTokenSource<TOptions>>(
             new ConfigurationChangeTokenSource<TOptions>(name, config));
