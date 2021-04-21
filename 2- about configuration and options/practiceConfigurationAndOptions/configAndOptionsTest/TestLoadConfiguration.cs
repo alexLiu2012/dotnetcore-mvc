@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Memory;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
+using System.Threading;
 using Xunit;
 
 namespace configAndOptionsTest
@@ -133,6 +136,97 @@ namespace configAndOptionsTest
             Assert.Equal("valuea", config["keya_xml"]);
 
             ConfigBuilder.Sources.Clear();
-        }                
+        }
+
+
+        // a change token defined in the base "configuration root",
+        // "reload" method will load data from the providers again, and then trigger the root token.on change,
+        // so registered customized handler into the root.token will be invoked.
+        //
+        // besides, change registrations had been registered with <provider.token, root token raise (re-create token)>,
+        // so any provider.token invoked, the root.token will be invoked as well
+        
+        [Fact]
+        public void TestReload()
+        {
+            ConfigBuilder.AddInMemoryCollection(
+                new Dictionary<string, string>()
+                {
+                    { "keya", "valuea" },
+                    { "keyb", "valueb" },
+                    { "keyc", "valuec" }
+                });
+
+            var config = ConfigBuilder.Build();
+
+            object obj = null;
+
+            // get reload token will always return a new change token
+            // register customized handler to the token, so that handler will be triggered WHEN "configurtion root.reload()" called
+            config.GetReloadToken().RegisterChangeCallback(c => obj = c, "changed");
+            config.Reload();
+            Assert.Equal("changed", (string)obj);
+
+            ConfigBuilder.Sources.Clear();
+        }
+
+
+        [Fact]
+        public void TestReloadByProvider()
+        {
+            // configuration source
+            var source = new MemoryConfigurationSource()
+            {
+                InitialData = new Dictionary<string, string>()
+                {
+                    { "keya", "valuea" },
+                    { "keyb", "valueb" },
+                    { "keyc", "valuec" }
+                }
+            };
+            // configuration provider
+            var provider = new MemoryConfigurationProvider(source);
+            // configuration root
+            var configuration = new ConfigurationRoot(new List<IConfigurationProvider>() { provider });
+
+
+            object obj = null;
+
+            // register configration provider change handler
+            provider.GetReloadToken().RegisterChangeCallback(c => { }, "");
+            // register configuration root chagne handler
+            configuration.GetReloadToken().RegisterChangeCallback(c => obj = c, "changed");
+
+            // get configuration token -reload method by reflet
+            var reloadReflected = typeof(ConfigurationProvider).GetMethod("OnReload", BindingFlags.NonPublic | BindingFlags.Instance);
+
+            reloadReflected.Invoke(provider, null);
+            Assert.Equal("changed", obj);
+        }
+
+        
+        // another change registerations defined in the base "file configuration provider", 
+        // <file change token, load provider (again)> was regiestered.
+        // in "Load()" method, base "file configuration provider" token will be triggered        
+
+        [Fact]
+        public void TestReloadInFileConfiguration()
+        {            
+            var path = Path.Combine(Directory.GetCurrentDirectory(), "configReload.json");            
+
+            ConfigBuilder.AddJsonFile(path, false, reloadOnChange: true);
+
+            var config = ConfigBuilder.Build();
+
+            object obj = null;
+            config.GetReloadToken().RegisterChangeCallback(c => obj = c, "changed");
+            
+            var content = File.ReadAllText(path);
+            File.WriteAllText(path, content);
+            
+            // sleep thread, as provider token has a delay
+            Thread.Sleep(5000);
+            Assert.Equal("changed", obj);            
+        }
     }
 }

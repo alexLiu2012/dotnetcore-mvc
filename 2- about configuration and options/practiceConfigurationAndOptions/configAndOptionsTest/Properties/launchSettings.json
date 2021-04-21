@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "configAndOptionsTest": {
+      "commandName": "Project",
+      "nativeDebugging": false
+    }
+  }
+}

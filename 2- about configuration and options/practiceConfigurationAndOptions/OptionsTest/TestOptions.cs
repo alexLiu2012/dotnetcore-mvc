@@ -4,8 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
 using Xunit;
 
 namespace configAndOptionsTest
@@ -203,7 +201,10 @@ namespace configAndOptionsTest
            so such type will be injected into di with service "configure options", "post configure options" and/or "validate options" */
 
         // define customized type
-        private class OptionsConfig : IConfigureOptions<Config>, IPostConfigureOptions<Config>, IValidateOptions<Config>
+        private class OptionsConfig : 
+            IConfigureOptions<Config>, 
+            IPostConfigureOptions<Config>, 
+            IValidateOptions<Config>
         {            
             public void Configure(Config options)
             {
@@ -237,15 +238,21 @@ namespace configAndOptionsTest
             // configure options with customized object
             ServiceCollection.Clear();
             var instance = new OptionsConfig();
-            ServiceCollection.ConfigureOptions<OptionsConfig>();
+            ServiceCollection.ConfigureOptions(instance);
             Services = ServiceCollection.BuildServiceProvider();
 
             var config2 = Services.GetService<IOptions<Config>>()?.Value;
             Assert.Equal("value_configured", config2.Keya);
             Assert.Equal("value_post_configured", config2.Keyb);
 
-
             // with name???
+        }
+
+
+        [Fact]
+        public void TestOptionsMonitor()
+        {
+            ServiceCollection.Clear();            
         }
     }
 }

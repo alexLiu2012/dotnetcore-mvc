@@ -226,14 +226,7 @@ public static class ConfigurationExtensions
         }
     }
                 
-    public static IConfigurationBuilder Add<TSource>(
-        this IConfigurationBuilder builder, 
-        Action<TSource> configureSource) where TSource : IConfigurationSource, new()
-    {
-        var source = new TSource();
-        configureSource?.Invoke(source);
-        return builder.Add(source);
-    }        
+    
 }
 
 ```
@@ -306,6 +299,8 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         {
             p.Load();
             _changeTokenRegistrations.Add(
+                // 绑定 token 和 token consumer，
+                // 即每个 provider 的变化，都调用 raise changed（configuration 的 token）
                 ChangeToken.OnChange(
                     () => p.GetReloadToken(), 
                     () => RaiseChanged()));
@@ -327,9 +322,10 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
         }
         RaiseChanged();
     }
-    
+        
     private void RaiseChanged()
     {
+        // 重新创建 change token（token 只能使用一次）
         ConfigurationReloadToken previousToken = Interlocked.Exchange(ref _changeToken, new ConfigurationReloadToken());
         previousToken.OnReload();
     }
@@ -690,6 +686,23 @@ public class ConfigurationBuilder : IConfigurationBuilder
         }
         return new ConfigurationRoot(providers);
     }
+}
+
+```
+
+##### 2.4.3 扩展方法 - add action
+
+```c#
+public static class ConfigurationExtensions
+{
+    public static IConfigurationBuilder Add<TSource>(
+        this IConfigurationBuilder builder, 
+        Action<TSource> configureSource) where TSource : IConfigurationSource, new()
+    {
+        var source = new TSource();
+        configureSource?.Invoke(source);
+        return builder.Add(source);
+    }   
 }
 
 ```
@@ -5060,7 +5073,7 @@ public class OptionsMonitor<[DynamicallyAccessedMembers(Options.DynamicallyAcces
         name = name ?? Options.DefaultName;
         // 清除 cache
         _cache.TryRemove(name);
-        // 用 options factory 创建新的 options 并注入 cache
+        // 解析 options(with name as parameter)，没有则用 options factory 创建并注入 cache
         TOptions options = Get(name);
         
         // 调用 on change action（customized options changed 钩子）
@@ -5078,6 +5091,7 @@ public class OptionsMonitor<[DynamicallyAccessedMembers(Options.DynamicallyAcces
     }
     
     // customized on change handler
+    // TOptions 的 实例就是 newer instance，string 是 name！！！
     public IDisposable OnChange(Action<TOptions, string> listener)
     {
         var disposable = new ChangeTrackerDisposable(this, listener);
@@ -6134,7 +6148,7 @@ public class NamedConfigureFromConfigurationOptions<TOptions> :
 
 ```
 
-##### 4.6.2 configuration change token
+##### 4.6.2 configuration change token source
 
 ```c#
 public class ConfigurationChangeTokenSource<TOptions> : IOptionsChangeTokenSource<TOptions>
