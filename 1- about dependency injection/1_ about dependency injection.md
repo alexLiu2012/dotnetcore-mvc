@@ -1952,8 +1952,7 @@ public static class ServiceCollectionContainerBuilderExtensions
         this IServiceCollection services, 
         bool validateScopes)
     {
-        return services.BuildServiceProvider(
-            new ServiceProviderOptions { ValidateScopes = validateScopes });
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = validateScopes });
     }
           
     public static ServiceProvider BuildServiceProvider(
@@ -1993,11 +1992,7 @@ public static class ServiceCollectionContainerBuilderExtensions
 
 ```
 
-
-
 #### 2.3 service provider
-
-##### 2.3.1 接口
 
 ```c#
 public interface IServiceProvider
@@ -2007,9 +2002,7 @@ public interface IServiceProvider
 
 ```
 
-##### 2.3.2 service provider
-
-* ms（默认）实现
+##### 2.3.1 service provider（实现）
 
 ```c#
 public sealed class ServiceProvider : 
@@ -2026,16 +2019,17 @@ public sealed class ServiceProvider :
         IServiceProviderEngine engine, 
         ServiceProviderOptions options)
     {
+        // 注入 service provider engine
         _engine = engine;
         
-        // 如果 service provider options 标记，验证 service scope
+        // 如果 options 标记了 validate scope，-> engine 验证 service scope
         if (options.ValidateScopes)
         {
             _engine.InitializeCallback(this);
             _callSiteValidator = new CallSiteValidator();
         }
         
-        // 如果 service provider options 标记，验证 service descriptor
+        // 如果 options 标记了 validate on build，-> engine 验证 service descriptor
         if (options.ValidateOnBuild)
         {
             List<Exception> exceptions = null;
@@ -2061,11 +2055,8 @@ public sealed class ServiceProvider :
             }
         }
     }
-        
-    /* 实现 IServiceProvider 的 get service 方法 */          
-    public object GetService(Type serviceType) => _engine.GetService(serviceType);
-      
-    /* 实现 IServiceProviderFacotry 的方法 */          
+                  
+    /* service provider engine callback 的方法 */          
     void IServiceProviderEngineCallback.OnCreate(ServiceCallSite callSite)
     {
         _callSiteValidator.ValidateCallSite(callSite);
@@ -2095,7 +2086,7 @@ public sealed class ServiceProvider :
 
 ```
 
-###### 2.3.2.1 service provider options
+###### 2.3.1.1 service provider options
 
 * 单例
 
@@ -2109,64 +2100,30 @@ public class ServiceProviderOptions
 
 ```
 
-###### 2.3.2.2 service provider engine
+###### 2.3.1.2 service provider engine callback?
+
+```c#
+service provider engine callback
+```
 
 * service 解析引擎，
 * 递归解析
 
+##### 2.3.2 方法 - get service (by type)
+
+* 如果解析失败，返回 null，不会抛出异常
+
+```c#
+public sealed class ServiceProvider 
+{              
+    public object GetService(Type serviceType) => _engine.GetService(serviceType);
+}
+
+```
+
 ##### 2.3.3 扩展方法
 
-###### 2.3.3.1 get required service
-
-```c#
-public static class ServiceProviderServiceExtensions
-{
-    public static object GetRequiredService(
-        this IServiceProvider provider, 
-        Type serviceType)
-    {
-        if (provider == null)
-        {
-            throw new ArgumentNullException(nameof(provider));
-        }        
-        if (serviceType == null)
-        {
-            throw new ArgumentNullException(nameof(serviceType));
-        }
-        
-        // 如果实现了 ISupportRequiredService 接口，
-        // 直接调用 ISupportRequiredService 对应方法
-        if (provider is ISupportRequiredService 
-            requiredServiceSupportingProvider)
-        {
-            return requiredServiceSupportingProvider.GetRequiredService(serviceType);
-        }
-        
-        object? service = provider.GetService(serviceType);
-        
-        if (service == null)
-        {
-            throw new InvalidOperationException(
-                SR.Format(SR.NoServiceRegistered, serviceType));
-        }
-        
-        return service;
-    }
-}
-
-```
-
-###### 2.3.3.2 support required service 接口
-
-```c#
-public interface ISupportRequiredService
-{    
-    object GetRequiredService(Type serviceType);
-}
-
-```
-
-###### 2.3.3.3 get T service
+###### 2.3.3.1 get service t
 
 ```c#
 public static class ServiceProviderServiceExtensions
@@ -2180,9 +2137,24 @@ public static class ServiceProviderServiceExtensions
         
         return (T?)provider.GetService(typeof(T));
     }
-                    
-    public static T GetRequiredService<T>(this IServiceProvider provider) 
-        where T : notnull
+}
+
+```
+
+###### 2.3.3.2 get required service
+
+```c#
+// 扩展接口
+public interface ISupportRequiredService
+{    
+    object GetRequiredService(Type serviceType);
+}
+
+
+public static class ServiceProviderServiceExtensions
+{
+    // get required service (by t)
+    public static T GetRequiredService<T>(this IServiceProvider provider) where T : notnull
     {
         if (provider == null)
         {
@@ -2191,17 +2163,52 @@ public static class ServiceProviderServiceExtensions
         
         return (T)provider.GetRequiredService(typeof(T));
     }                         
+    
+    // get required service (by type)
+    public static object GetRequiredService(
+        this IServiceProvider provider, 
+        Type serviceType)
+    {
+        if (provider == null)
+        {
+            throw new ArgumentNullException(nameof(provider));
+        }        
+        if (serviceType == null)
+        {
+            throw new ArgumentNullException(nameof(serviceType));
+        }
+        
+        // 如果实现了 ISupportRequiredService 接口，-> 调用 ISupportRequiredService 对应方法
+        if (provider is ISupportRequiredService requiredServiceSupportingProvider)
+        {
+            return requiredServiceSupportingProvider.GetRequiredService(serviceType);
+        }
+        
+        // （由上），service provider 没有实现 support required service 接口
+        
+        // 解析 service 实例
+        object? service = provider.GetService(serviceType);
+        // 如果为 null，-> 抛出异常
+        if (service == null)
+        {
+            throw new InvalidOperationException(SR.Format(SR.NoServiceRegistered, serviceType));
+        }
+        
+        return service;
+    }        
 }
 
 ```
 
-###### 2.3.3.4 get enumerable services
+###### 2.3.3.3 get (enumerable) services
+
+* 调用了 required services；如果没有，-> 抛出异常
 
 ```c#
 public static class ServiceProviderServiceExtensions
 {
-    public static IEnumerable<T> GetServices<T>(
-        this IServiceProvider provider)
+    // by t
+    public static IEnumerable<T> GetServices<T>(this IServiceProvider provider)
     {
         if (provider == null)
         {
@@ -2211,6 +2218,7 @@ public static class ServiceProviderServiceExtensions
         return provider.GetRequiredService<IEnumerable<T>>();
     }
            
+    // by type
     public static IEnumerable<object?> GetServices(
         this IServiceProvider provider, 
         Type serviceType)
@@ -2225,25 +2233,21 @@ public static class ServiceProviderServiceExtensions
             throw new ArgumentNullException(nameof(serviceType));
         }
         
-        Type? genericEnumerable = 
-            typeof(IEnumerable<>).MakeGenericType(serviceType);
-        return (IEnumerable<object>)provider
-            .GetRequiredService(genericEnumerable);
+        Type? genericEnumerable = typeof(IEnumerable<>).MakeGenericType(serviceType);
+        return (IEnumerable<object>)provider.GetRequiredService(genericEnumerable);
     }
 }
 
 ```
 
-###### 2.3.3.5 create scope
+###### 2.3.3.4 create scope
 
 ```c#
 public static class ServiceProviderServiceExtensions
 {
-    public static IServiceScope CreateScope(
-        this IServiceProvider provider)
+    public static IServiceScope CreateScope(this IServiceProvider provider)
     {
-        return provider.GetRequiredService<IServiceScopeFactory>()
-            		   .CreateScope();
+        return provider.GetRequiredService<IServiceScopeFactory>().CreateScope();
     }
 }
 
@@ -2251,11 +2255,8 @@ public static class ServiceProviderServiceExtensions
 
 ##### 2.3.4 service provider factory
 
-###### 2.3.4.1 接口
-
 ```c#
-public interface IServiceProviderFactory<TContainerBuilder> 
-    where TContainerBuilder : notnull
+public interface IServiceProviderFactory<TContainerBuilder> where TContainerBuilder : notnull
 {    
     TContainerBuilder CreateBuilder(IServiceCollection services);        
     IServiceProvider CreateServiceProvider(TContainerBuilder containerBuilder);
@@ -2267,8 +2268,6 @@ public interface IServiceProviderFactory<TContainerBuilder>
 
 * 使用`IServiceCollection`作为`TContainerBuilder`
 * 调用 service collection 的扩展方法
-  * 创建 service provider engine
-  * 用 service provider engine 构建 service provider
 
 ```c#
 public class DefaultServiceProviderFactory : IServiceProviderFactory<IServiceCollection>
@@ -2296,6 +2295,7 @@ public class DefaultServiceProviderFactory : IServiceProviderFactory<IServiceCol
         
     public IServiceProvider CreateServiceProvider(IServiceCollection containerBuilder)
     {
+        // 使用 service collection 的 builder service provider 方法
         return containerBuilder.BuildServiceProvider(_options);
     }
 }
@@ -2303,8 +2303,6 @@ public class DefaultServiceProviderFactory : IServiceProviderFactory<IServiceCol
 ```
 
 #### 2.4 service scope
-
-##### 2.4.1 接口
 
 ```c#
 public interface IServiceScope : IDisposable
@@ -2314,7 +2312,7 @@ public interface IServiceScope : IDisposable
 
 ```
 
-##### 2.4.2 service provider engine scope
+##### 2.4.1 service provider engine scope
 
 ```c#
 internal class ServiceProviderEngineScope : 	
@@ -2329,7 +2327,7 @@ internal class ServiceProviderEngineScope :
     private bool _disposed;
     private readonly object _disposelock = new object();
         
-    
+    // service 容器
     internal Dictionary<ServiceCacheKey, object> ResolvedServices { get; } = new Dictionary<ServiceCacheKey, object>();
         
     public ServiceProviderEngine Engine { get; }
@@ -2370,9 +2368,8 @@ internal class ServiceProviderEngineScope :
                 }
                 else
                 {
-                    // sync over async, 
-                    // for the rare case that an object only implements 
-                    // IAsyncDisposable and may end up starving the thread pool.
+                    // sync over async, for the rare case that an object only implements IAsyncDisposable and may end up 
+                    // starving the thread pool.
                     Task.Run(() => 
                     	((IAsyncDisposable)service).DisposeAsync()
                               					  .AsTask())
@@ -2500,8 +2497,6 @@ internal class ServiceProviderEngineScope :
 
 ##### 2.4.3 service scope factory
 
-###### 2.4.3.1 接口
-
 ```c#
 public interface IServiceScopeFactory
 {    
@@ -2510,33 +2505,11 @@ public interface IServiceScopeFactory
 
 ```
 
-###### 2.4.3.2 service provider engine
+###### 2.4.3.1 （实现）service provider engine
 
-* service provider engine 实现了 IServiceScopeFactory 接口
 
-```c#
-internal abstract class ServiceProviderEngine : 
-	IServiceProviderEngine, 
-	IServiceScopeFactory
-{
-    // ...
-    
-    public IServiceScope CreateScope()
-    {
-        if (_disposed)
-        {
-            ThrowHelper.ThrowObjectDisposedException();
-        }
-        
-        return new ServiceProviderEngineScope(this);
-    }
-}
-
-```
 
 #### 2.5 service provider engine
-
-##### 2.5.1 接口
 
 ```c#
 internal interface IServiceProviderEngine : 
@@ -2551,7 +2524,7 @@ internal interface IServiceProviderEngine :
 
 ```
 
-##### 2.5.2 service provider engine
+##### 2.5.1 service provider engine
 
 ```c#
 internal abstract class ServiceProviderEngine : 
@@ -2585,13 +2558,8 @@ internal abstract class ServiceProviderEngine :
            注册 service scope factory */
         CallSiteFactory = new CallSiteFactory(serviceDescriptors);
         
-        CallSiteFactory.Add(
-            typeof(IServiceProvider), 
-            new ServiceProviderCallSite());
-        
-        CallSiteFactory.Add(
-            typeof(IServiceScopeFactory), 
-            new ServiceScopeFactoryCallSite());
+        CallSiteFactory.Add(typeof(IServiceProvider), new ServiceProviderCallSite());        
+        CallSiteFactory.Add(typeof(IServiceScopeFactory), new ServiceScopeFactoryCallSite());
         
         // 创建 realized services
         RealizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object>>();
@@ -2601,9 +2569,7 @@ internal abstract class ServiceProviderEngine :
     // 在 service provider callback 中注册 service_type 的 callsite
     private Func<ServiceProviderEngineScope, object> CreateServiceAccessor(Type serviceType)
     {
-        ServiceCallSite callSite = CallSiteFactory.GetCallSite(
-            serviceType, 
-            new CallSiteChain());
+        ServiceCallSite callSite = CallSiteFactory.GetCallSite(serviceType, new CallSiteChain());
         
         if (callSite != null)
         {
@@ -2639,7 +2605,7 @@ internal abstract class ServiceProviderEngine :
 
 ```
 
-###### 2.5.2.1 validate
+###### 2.5.1.1 validate
 
 ```c#
 internal abstract class ServiceProviderEngine 
@@ -2674,7 +2640,7 @@ internal abstract class ServiceProviderEngine
 
 ```
 
-###### 2.5.2.2 get service
+###### 2.5.1.2 get service
 
 ```c#
 internal abstract class ServiceProviderEngine 
@@ -2694,19 +2660,16 @@ internal abstract class ServiceProviderEngine
             serviceType, 
             _createServiceAccessor);
         
-        _callback?.OnResolve(
-            serviceType, 
-            serviceProviderEngineScope);
+        _callback?.OnResolve(serviceType, serviceProviderEngineScope);
         
-        DependencyInjectionEventSource.Log.ServiceResolved(serviceType);
-        
+        DependencyInjectionEventSource.Log.ServiceResolved(serviceType);        
         return realizedService.Invoke(serviceProviderEngineScope);
     }    
 }
 
 ```
 
-###### 2.5.2.3 create scope
+###### 2.5.1.3 create scope
 
 ```c#
 internal abstract class ServiceProviderEngine 
@@ -2724,7 +2687,7 @@ internal abstract class ServiceProviderEngine
 
 ```
 
-##### 2.5.3 runtime service provider engine
+##### 2.5.2 runtime service provider engine
 
 ```c#
 internal class RuntimeServiceProviderEngine : ServiceProviderEngine
@@ -2737,10 +2700,9 @@ internal class RuntimeServiceProviderEngine : ServiceProviderEngine
     {
         return scope =>
         {
-            Func<ServiceProviderEngineScope, object> realizedService = p => RuntimeResolver.Resolve(callSite, p);
-            
+            Func<ServiceProviderEngineScope, object> realizedService = p => RuntimeResolver.Resolve(callSite, p);            
             RealizedServices[callSite.ServiceType] = realizedService;
-
+            
             return realizedService(scope);
         };
     }
@@ -2748,7 +2710,7 @@ internal class RuntimeServiceProviderEngine : ServiceProviderEngine
 
 ```
 
-##### 2.5.4 compiled service provider engine
+##### 2.5.3 compiled service provider engine
 
 ```c#
 internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
@@ -2759,9 +2721,7 @@ internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
     public ExpressionResolverBuilder ResolverBuilder { get; }
 #endif
     
-    public CompiledServiceProviderEngine(
-    	IEnumerable<ServiceDescriptor> serviceDescriptors) : 
-    		base(serviceDescriptors)
+    public CompiledServiceProviderEngine(IEnumerable<ServiceDescriptor> serviceDescriptors) : base(serviceDescriptors)
     {
 #if IL_EMIT
         ResolverBuilder = new ILEmitResolverBuilder(RuntimeResolver, this, Root);
@@ -2772,8 +2732,7 @@ internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
 
     protected override Func<ServiceProviderEngineScope, object> RealizeService(ServiceCallSite callSite)
     {
-        Func<ServiceProviderEngineScope, object> realizedService = ResolverBuilder.Build(callSite);
-        
+        Func<ServiceProviderEngineScope, object> realizedService = ResolverBuilder.Build(callSite);        
         RealizedServices[callSite.ServiceType] = realizedService;
         
         return realizedService;
@@ -2782,7 +2741,7 @@ internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
 
 ```
 
-##### 2.5.5 dynamic service provider engine
+##### 2.5.4 dynamic service provider engine
 
 ```c#
 internal class DynamicServiceProviderEngine : CompiledServiceProviderEngine
@@ -2826,8 +2785,6 @@ internal class DynamicServiceProviderEngine : CompiledServiceProviderEngine
 
 #### 2.6 activator utilities
 
-##### 2.6.1 activator utilities
-
 ```c#
 public static class ActivatorUtilities
 {
@@ -2868,17 +2825,8 @@ public static class ActivatorUtilities
         throw new InvalidOperationException(
             $"Constructor marked with {nameof(ActivatorUtilitiesConstructorAttribute)} does not accept all given argument types.");
     }
-}
-
-```
-
-##### 2.6.1 create instance
-
-###### 2.6.1.1 constructor matcher
-
-```c#
-public static class ActivatorUtilities
-{
+        
+    // constructor matcher 结构体
     private struct ConstructorMatcher
     {
         private readonly ConstructorInfo _constructor;
@@ -2984,11 +2932,20 @@ public static class ActivatorUtilities
 
 ```
 
-###### 2.6.1.2 create object
+##### 2.6.1 create instance
 
 ```c#
 public static class ActivatorUtilities
 {
+    // create by t
+    public static T CreateInstance<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(
+        IServiceProvider provider, 
+        params object[] parameters)
+    {
+        return (T)CreateInstance(provider, typeof(T), parameters);
+    }
+    
+    // create by type
     public static object CreateInstance(
         IServiceProvider provider,
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type instanceType,
@@ -3050,52 +3007,40 @@ public static class ActivatorUtilities
 
 ```
 
-###### 2.6.1.3 create T
+##### 2.6.2 get or create 
 
 ```c#
 public static class ActivatorUtilities
 {
-    public static T CreateInstance<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(
-        IServiceProvider provider, 
-        params object[] parameters)
-    {
-        return (T)CreateInstance(provider, typeof(T), parameters);
-    }
-}
-```
-
-###### 2.6.1.4 get or create
-
-```c#
-public static class ActivatorUtilities
-{
-    public static object GetServiceOrCreateInstance(
-        IServiceProvider provider,
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type)
-    {
-        return provider.GetService(type) ?? CreateInstance(provider, type);
-    }
-    
+    // by t
     public static T 
         GetServiceOrCreateInstance<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(
         	IServiceProvider provider)
     {
         return (T)GetServiceOrCreateInstance(provider, typeof(T));
-    }                
+    }              
+    
+    // by type
+    public static object GetServiceOrCreateInstance(
+        IServiceProvider provider,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type)
+    {
+        return provider.GetService(type) ?? CreateInstance(provider, type);
+    }        
 }
 
 ```
 
-##### 2.6.2 create object factory
+##### 2.6.3 create object factory
 
-###### 2.6.2.1 object factory
+###### 2.6.3.1 object factory
 
 ```c#
 public delegate object ObjectFactory(IServiceProvider serviceProvider, object?[]? arguments);
      
 ```
 
-###### 2.6.2.2 create factory
+###### 2.6.3.2 create factory
 
 ```c#
 public static class ActivatorUtilities
@@ -3138,7 +3083,7 @@ public static class ActivatorUtilities
 
 ```
 
-###### 2.6.2.3 find constructor
+###### 2.6.3.3 find constructor
 
 ```c#
 public static class ActivatorUtilities
@@ -3170,7 +3115,7 @@ public static class ActivatorUtilities
 
 ```
 
-###### 2.6.2.4 find preferred constructor
+###### 2.6.3.4 find preferred constructor
 
 ```c#
 public static class ActivatorUtilities
@@ -3217,7 +3162,7 @@ public static class ActivatorUtilities
 
 ```
 
-###### 2.6.2.4 find matching constructor
+###### 2.6.3.5 find matching constructor
 
 ```c#
 public static class ActivatorUtilities
@@ -3259,7 +3204,7 @@ public static class ActivatorUtilities
                         
 ```
 
-###### 2.6.2.5 create parameter map
+###### 2.6.3.6 create parameter map
 
 ```c#
 public static class ActivatorUtilities
@@ -3304,7 +3249,7 @@ public static class ActivatorUtilities
 
 ```
 
-###### 2.6.2.6 build factory expression
+###### 2.6.3.7 build factory expression
 
 ```c#
 public static class ActivatorUtilities
