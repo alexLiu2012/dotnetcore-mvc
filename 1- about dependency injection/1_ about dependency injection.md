@@ -94,11 +94,12 @@ web request 将创建新的 service scope
     "ImplementationType = {ImplementationType}")]
 public class ServiceDescriptor
 {
+    // service
     public ServiceLifetime Lifetime { get; }    
     public Type ServiceType { get; }    
     
-    [DynamicallyAccessedMembers(
-        DynamicallyAccessedMemberTypes.PublicConstructors)]
+    // implementation
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
     public Type? ImplementationType { get; }    
     public object? ImplementationInstance { get; }    
     public Func<IServiceProvider, object>? ImplementationFactory { get; }
@@ -112,60 +113,48 @@ public class ServiceDescriptor
     // get implementation type
     internal Type GetImplementationType()
     {
-        // 如果 implementation type 不为 null，
+        // => impl type
         if (ImplementationType != null)
         {
             return ImplementationType;
         }
-        // 如果 implementation instance 不为 null
+        // => impl instance.get type
         else if (ImplementationInstance != null)
         {
             return ImplementationInstance.GetType();
         }
-        // 如果 implementation factory (func) 不为 null
+        // => impl faction<t> => t
         else if (ImplementationFactory != null)
         {
-            // 获取 implementationFactory 的泛型参数,
-            // factory<TService,TImplementation> 的 TImplementation
-            Type[]? typeArguments = ImplementationFactory
-                .GetType()
-                .GenericTypeArguments; 
-            // 如果 TImplementation 不为空，
-            // 返回 TImplementation (type)
+            // 获取 implementationFactory 的泛型参数, 即 fctory<TService,TImplementation> 的 TImplementation
+            Type[]? typeArguments = ImplementationFactory.GetType().GenericTypeArguments; 
+            // 如果 TImplementation 不为空，返回 TImplementation (type)
             Debug.Assert(typeArguments.Length == 2);            
             return typeArguments[1];
         }
         
-        // 没有获取到 implementation type，
-        // 返回 null
+        // 没有获取到 implementation type，返回 null
         Debug.Assert(
             false, 
-            "ImplementationType, 
-            "ImplementationInstance or 
-            "ImplementationFactory must be non null");        
+            "ImplementationType, ImplementationInstance or ImplementationFactory must be non null");        
         return null;
     }                                         
     
     public override string ToString()
     {
-        string? lifetime = 
-            $"{nameof(ServiceType)}: {ServiceType} 
-        	 "{nameof(Lifetime)}: {Lifetime} ";
+        string? lifetime = $"{nameof(ServiceType)}: {ServiceType} {nameof(Lifetime)}: {Lifetime} ";
         
         if (ImplementationType != null)
         {
-            return lifetime + 
-                $"{nameof(ImplementationType)}: {ImplementationType}";
+            return lifetime + $"{nameof(ImplementationType)}: {ImplementationType}";
         }
         
         if (ImplementationFactory != null)
         {
-            return lifetime + 
-                $"{nameof(ImplementationFactory)}: {ImplementationFactory.Method}";
+            return lifetime + $"{nameof(ImplementationFactory)}: {ImplementationFactory.Method}";
         }
         
-        return lifetime + 
-            $"{nameof(ImplementationInstance)}: {ImplementationInstance}";
+        return lifetime + $"{nameof(ImplementationInstance)}: {ImplementationInstance}";
     }         
 }
 
@@ -180,11 +169,12 @@ public class ServiceDescriptor
 {
     public ServiceDescriptor(
         Type serviceType,  
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes.PublicConstructors)] 
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] 
         Type implementationType,            
-        ServiceLifetime lifetime)            
-        	: this(serviceType, lifetime)
+        ServiceLifetime lifetime) : 
+    		this(
+                serviceType, 
+                lifetime)
     {
         if (serviceType == null)
         {
@@ -208,8 +198,10 @@ public class ServiceDescriptor
 {
     public ServiceDescriptor(
         Type serviceType,
-        object instance)            
-        	: this(serviceType, ServiceLifetime.Singleton)
+        object instance) : 
+    		this(
+                serviceType, 
+                ServiceLifetime.Singleton)
     {
         if (serviceType == null)
         {
@@ -235,8 +227,10 @@ public class ServiceDescriptor
     public ServiceDescriptor(
         Type serviceType,
         Func<IServiceProvider, object> factory,
-        ServiceLifetime lifetime)            
-        	: this(serviceType, lifetime)
+        ServiceLifetime lifetime) : 
+    		this(
+                serviceType, 
+                lifetime)
     {
         if (serviceType == null)
         {
@@ -263,11 +257,9 @@ public class ServiceDescriptor
 public class ServiceDescriptor
 {
     // 泛型方法
-    private static ServiceDescriptor Describe
-        <TService, 
-    	 [DynamicallyAccessedMembers(
-             DynamicallyAccessedMemberTypes.PublicConstructors)] 
-    	TImplementation>(ServiceLifetime lifetime)            
+    private static ServiceDescriptor Describe<
+        TService, 
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(ServiceLifetime lifetime)     
             where TService : class            
             where TImplementation : class, TService
     {
@@ -280,8 +272,7 @@ public class ServiceDescriptor
     // 参数方法
     public static ServiceDescriptor Describe(
         Type serviceType,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes.PublicConstructors)] 
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] 
         Type implementationType,
         ServiceLifetime lifetime)
     {
@@ -323,11 +314,9 @@ public class ServiceDescriptor
 public class ServiceDescriptor
 {
     // 泛型方法
-    public static ServiceDescriptor Singleton
-        <TService, 
-    	 [DynamicallyAccessedMembers(
-             DynamicallyAccessedMemberTypes.PublicConstructors)] 
-    	 TImplementation>()            
+    public static ServiceDescriptor Singleton<
+        TService, 
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()            
              where TService : class            
              where TImplementation : class, TService
     {
@@ -337,8 +326,7 @@ public class ServiceDescriptor
     // 参数方法    
     public static ServiceDescriptor Singleton(
         Type service,     
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes.PublicConstructors)] 
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] 
         Type implementationType)
     {
         if (service == null)
@@ -371,7 +359,8 @@ public class ServiceDescriptor
             typeof(TService), 
             implementationFactory, 
             ServiceLifetime.Singleton);
-    }                    
+    }       
+}             
     
 ```
 
@@ -471,13 +460,11 @@ public class ServiceDescriptor
 public class ServiceDescriptor
 {
     // 泛型方法
-    public static ServiceDescriptor Scoped
-        <TService, 
-    	 DynamicallyAccessedMembers(
-             DynamicallyAccessedMemberTypes.PublicConstructors)] 
-         TImplementation>()            
-             where TService : class            
-             where TImplementation : class, TService
+    public static ServiceDescriptor Scoped<
+        TService, 
+    	DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()            
+            where TService : class            
+            where TImplementation : class, TService
     {
         return Describe<TService, TImplementation>(ServiceLifetime.Scoped);
     }
@@ -485,8 +472,7 @@ public class ServiceDescriptor
     // 参数方法    
     public static ServiceDescriptor Scoped(
         Type service,       
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes.PublicConstructors)] 
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] 
         Type implementationType)
     {
         return Describe(
@@ -504,9 +490,8 @@ public class ServiceDescriptor
 public class ServiceDescriptor
 {    
     // 泛型方法    
-    public static ServiceDescriptor Scoped<TService>(
-        Func<IServiceProvider, TService> implementationFactory)            
-        	where TService : class
+    public static ServiceDescriptor Scoped<TService>(Func<IServiceProvider, TService> implementationFactory)            
+        where TService : class
     {
         if (implementationFactory == null)
         {
@@ -539,6 +524,7 @@ public class ServiceDescriptor
             ServiceLifetime.Scoped);
     }
 }
+
 ```
 
 ###### 2.1.4.3 by impl type and factory
@@ -575,11 +561,9 @@ public class ServiceDescriptor
 public class ServiceDescriptor
 {
     // 泛型方法
-    public static ServiceDescriptor Transient
-        <TService, 
-    	 [DynamicallyAccessedMembers(
-             DynamicallyAccessedMemberTypes.PublicConstructors)] 
-    	 TImplementation>()            
+    public static ServiceDescriptor Transient<
+        TService, 
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>()            
             where TService : class            
             where TImplementation : class, TService
     {
@@ -589,8 +573,7 @@ public class ServiceDescriptor
     // 参数方法
     public static ServiceDescriptor Transient(
         Type service,         
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes.PublicConstructors)] 
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] 
         Type implementationType)
     {
         if (service == null)
@@ -681,7 +664,7 @@ public class ServiceDescriptor
 
 #### 2.2 service collection
 
-* service descriptor 容器
+* 默认的 service descriptor 容器
 
 ##### 2.2.1 接口
 
@@ -703,8 +686,7 @@ public class ServiceCollection : IServiceCollection
     public int Count => _descriptors.Count;        
     public bool IsReadOnly => false;        
        
-    /* enumerator */
-    
+    /* enumerator */    
     public ServiceDescriptor this[int index]
     {
         get
@@ -727,8 +709,7 @@ public class ServiceCollection : IServiceCollection
         return GetEnumerator();
     }
     
-    /* crud */   
-    
+    /* crud */       
     void ICollection<ServiceDescriptor>.Add(ServiceDescriptor item)
     {
         _descriptors.Add(item);
@@ -793,8 +774,7 @@ public static class ServiceCollectionDescriptorExtensions
             throw new ArgumentNullException(nameof(descriptor));
         }
         
-        collection.Add(descriptor);
-        
+        collection.Add(descriptor);        
         return collection;
     }
     
@@ -818,7 +798,8 @@ public static class ServiceCollectionDescriptorExtensions
         }
         
         return collection;
-    }                                                                                            }
+    }       
+}
 ```
 
 ###### 2.2.3.2 try add
@@ -848,8 +829,7 @@ public static class ServiceCollectionDescriptorExtensions
         {
             if (collection[i].ServiceType == descriptor.ServiceType)
             {
-                // 已经注册了 (service_type) 的 descriptor，退出
-                // Already added
+                // 已经注册了 (service_type) 的 descriptor，退出                
                 return;
             }
         }
@@ -910,9 +890,10 @@ public static class ServiceCollectionDescriptorExtensions
             implementationType == descriptor.ServiceType)
         {
             throw new ArgumentException(
-                SR.Format(SR.TryAddIndistinguishableTypeToEnumerable,
-                          implementationType,
-                          descriptor.ServiceType),
+                SR.Format(
+                    SR.TryAddIndistinguishableTypeToEnumerable,
+                    implementationType,
+                    descriptor.ServiceType),
                 nameof(descriptor));
         }
         
@@ -939,8 +920,7 @@ public static class ServiceCollectionDescriptorExtensions
         if (services == null)
         {
             throw new ArgumentNullException(nameof(services));
-        }
-        
+        }        
         if (descriptors == null)
         {
             throw new ArgumentNullException(nameof(descriptors));
@@ -960,6 +940,11 @@ public static class ServiceCollectionDescriptorExtensions
 ```c#
 public static class ServiceCollectionDescriptorExtensions
 {
+    public static IServiceCollection RemoveAll<T>(this IServiceCollection collection)
+    {
+        return RemoveAll(collection, typeof(T));
+    }
+    
     public static IServiceCollection RemoveAll(
         this IServiceCollection collection, 
         Type serviceType)
@@ -979,12 +964,7 @@ public static class ServiceCollectionDescriptorExtensions
         }
         
         return collection;
-    }
-    
-    public static IServiceCollection RemoveAll<T>(this IServiceCollection collection)
-    {
-        return RemoveAll(collection, typeof(T));
-    }
+    }        
 }
 
 ```
@@ -1039,15 +1019,14 @@ public static class ServiceCollectionServiceExtensions
     private static IServiceCollection Add(
         IServiceCollection collection,
         Type serviceType,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType,
         ServiceLifetime lifetime)
     {
         var descriptor = new ServiceDescriptor(
             serviceType, 
             implementationType, 
             lifetime);
+        
         collection.Add(descriptor);
         return collection;
     }
@@ -1063,6 +1042,7 @@ public static class ServiceCollectionServiceExtensions
             serviceType, 
             implementationFactory, 
             lifetime);
+        
         collection.Add(descriptor);
         return collection;
     }
@@ -1075,13 +1055,10 @@ public static class ServiceCollectionServiceExtensions
 ```c#
 public static class ServiceCollectionServiceExtensions
 {
-    /* by service type*/
-    
+    /* by service type*/    
     public static IServiceCollection AddTransient(
         this IServiceCollection services,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type serviceType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type serviceType)
     {
         if (services == null)
         {
@@ -1097,12 +1074,10 @@ public static class ServiceCollectionServiceExtensions
             serviceType);
     }
     
-    public static IServiceCollection AddTransient<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TService>(
-        this IServiceCollection services)
-            where TService : class
+    public static IServiceCollection 
+        AddTransient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(
+        	this IServiceCollection services)
+            	where TService : class
     {
         if (services == null)
         {
@@ -1112,14 +1087,11 @@ public static class ServiceCollectionServiceExtensions
         return services.AddTransient(typeof(TService));
     }
     
-    /* by impl type */
-    
+    /* by impl type */    
     public static IServiceCollection AddTransient(
         this IServiceCollection services,
         Type serviceType,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (services == null)
         {
@@ -1143,12 +1115,10 @@ public static class ServiceCollectionServiceExtensions
     
     public static IServiceCollection AddTransient<
         TService, 
-    	[DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TImplementation>(
-        this IServiceCollection services)
-            where TService : class
-            where TImplementation : class, TService
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(
+        	this IServiceCollection services)
+            	where TService : class
+                where TImplementation : class, TService
     {
         if (services == null)
         {
@@ -1160,8 +1130,7 @@ public static class ServiceCollectionServiceExtensions
             typeof(TImplementation));
     }
     
-    /* by impl factory */
-    
+    /* by impl factory */    
     public static IServiceCollection AddTransient(
         this IServiceCollection services,
         Type serviceType,
@@ -1234,13 +1203,10 @@ public static class ServiceCollectionServiceExtensions
 ```c#
 public static class ServiceCollectionServiceExtensions
 {
-    /* by service type */
-    
+    /* by service type */    
     public static IServiceCollection AddScoped(
         this IServiceCollection services,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type serviceType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type serviceType)
     {
         if (services == null)
         {
@@ -1256,12 +1222,10 @@ public static class ServiceCollectionServiceExtensions
             serviceType);
     }
     
-    public static IServiceCollection AddScoped<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TService>(
-        this IServiceCollection services)            
-        	where TService : class
+    public static IServiceCollection 
+        AddScoped<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(
+	        this IServiceCollection services)            
+    	    	where TService : class
     {
         if (services == null)
         {
@@ -1271,14 +1235,11 @@ public static class ServiceCollectionServiceExtensions
         return services.AddScoped(typeof(TService));
     }
     
-    /* by impl type */
-    
+    /* by impl type */    
     public static IServiceCollection AddScoped(
         this IServiceCollection services,
         Type serviceType,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (services == null)
         {
@@ -1302,12 +1263,10 @@ public static class ServiceCollectionServiceExtensions
     
     public static IServiceCollection AddScoped<
         TService, 
-    	[DynamicallyAccessedMembers(
-        	DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TImplementation>(
-        this IServiceCollection services)            
-            where TService : class            
-            where TImplementation : class, TService
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(
+        	this IServiceCollection services)            
+	            where TService : class            
+    	        where TImplementation : class, TService
     {
         if (services == null)
         {
@@ -1319,8 +1278,7 @@ public static class ServiceCollectionServiceExtensions
             typeof(TImplementation));
     }
     
-    /* by impl factory */
-                
+    /* by impl factory */                
     public static IServiceCollection AddScoped(
         this IServiceCollection services,
         Type serviceType,
@@ -1393,13 +1351,10 @@ public static class ServiceCollectionServiceExtensions
 ```c#
 public static class ServiceCollectionServiceExtensions
 {
-    /* by service type */
-    
+    /* by service type */    
     public static IServiceCollection AddSingleton(
         this IServiceCollection services,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type serviceType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type serviceType)
     {
         if (services == null)
         {
@@ -1415,12 +1370,10 @@ public static class ServiceCollectionServiceExtensions
             serviceType);
     }
         
-    public static IServiceCollection AddSingleton<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TService>(
-        this IServiceCollection services)            
-        	where TService : class
+    public static IServiceCollection 
+        AddSingleton<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(
+	        this IServiceCollection services)            
+    	    	where TService : class
     {
         if (services == null)
         {
@@ -1430,14 +1383,11 @@ public static class ServiceCollectionServiceExtensions
         return services.AddSingleton(typeof(TService));
     }
     
-    /* by impl type */
-    
+    /* by impl type */    
     public static IServiceCollection AddSingleton(
         this IServiceCollection services,
         Type serviceType,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (services == null)
         {
@@ -1461,9 +1411,7 @@ public static class ServiceCollectionServiceExtensions
     
     public static IServiceCollection AddSingleton<
         TService, 
-    	[DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TImplementation>(
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(
         this IServiceCollection services)            
             where TService : class            
             where TImplementation : class, TService
@@ -1478,8 +1426,7 @@ public static class ServiceCollectionServiceExtensions
             typeof(TImplementation));
     }
     
-    /* by impl factory */
-    
+    /* by impl factory */    
     public static IServiceCollection AddSingleton(
         this IServiceCollection services,
         Type serviceType,
@@ -1543,8 +1490,7 @@ public static class ServiceCollectionServiceExtensions
             typeof(TService), 
             implementationFactory);
     }
-    
-    
+        
     public static IServiceCollection AddSingleton(
         this IServiceCollection services,
         Type serviceType,
@@ -1553,13 +1499,11 @@ public static class ServiceCollectionServiceExtensions
         if (services == null)
         {
             throw new ArgumentNullException(nameof(services));
-        }
-        
+        }        
         if (serviceType == null)
         {
             throw new ArgumentNullException(nameof(serviceType));
-        }
-        
+        }        
         if (implementationInstance == null)
         {
             throw new ArgumentNullException(nameof(implementationInstance));
@@ -1568,13 +1512,12 @@ public static class ServiceCollectionServiceExtensions
         var serviceDescriptor = new ServiceDescriptor(
             serviceType, 
             implementationInstance);
-        services.Add(serviceDescriptor);
         
+        services.Add(serviceDescriptor);        
         return services;
     }
     
-    /* by impl instance */
-    
+    /* by impl instance */    
     public static IServiceCollection AddSingleton<TService>(
         this IServiceCollection services,
         TService implementationInstance)            
@@ -1602,13 +1545,10 @@ public static class ServiceCollectionServiceExtensions
 ```c#
 public static class ServiceCollectionDescriptorExtensions
 {
-    /* by service_type */
-    
+    /* by service_type */    
      public static void TryAddTransient(
         this IServiceCollection collection,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type service)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type service)
     {
         if (collection == null)
         {
@@ -1625,12 +1565,10 @@ public static class ServiceCollectionDescriptorExtensions
         TryAdd(collection, descriptor);
     }
     
-    public static void TryAddTransient
-        <[DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TService>(
-        this IServiceCollection collection)        
-        	where TService : class
+    public static void 
+        TryAddTransient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(
+	        this IServiceCollection collection)        
+    	    	where TService : class
     {
         if (collection == null)
         {
@@ -1643,14 +1581,11 @@ public static class ServiceCollectionDescriptorExtensions
             typeof(TService));
     }        
                 
-    /* by service_type & impl_type */
-    
+    /* by service_type & impl_type */    
     public static void TryAddTransient(
         this IServiceCollection collection,
         Type service,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (collection == null)
         {
@@ -1667,15 +1602,14 @@ public static class ServiceCollectionDescriptorExtensions
         
         var descriptor = ServiceDescriptor.Transient(
             service, 
-            implementationType);        
+            implementationType);      
+        
         TryAdd(collection, descriptor);
     }               
     
-    public static void TryAddTransient
-        <TService, 
-    	 [DynamicallyAccessedMembers(
-             DynamicallyAccessedMemberTypes
-             	.PublicConstructors)] TImplementation>(
+    public static void TryAddTransient<
+        TService, 
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(
         this IServiceCollection collection)            
         	where TService : class            
             where TImplementation : class, TService
@@ -1691,8 +1625,7 @@ public static class ServiceCollectionDescriptorExtensions
             typeof(TImplementation));
     } 
     
-    /* by impl factory */
-    
+    /* by impl factory */    
     public static void TryAddTransient(
         this IServiceCollection collection,
         Type service,
@@ -1716,6 +1649,7 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Transient(
             service, 
             implementationFactory);
+        
         TryAdd(collection, descriptor);
     }
         
@@ -1736,13 +1670,10 @@ public static class ServiceCollectionDescriptorExtensions
 ```c#
 public static class ServiceCollectionDescriptorExtensions
 {
-    /* by service type */
-    
+    /* by service type */    
     public static void TryAddScoped(
         this IServiceCollection collection,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type service)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type service)
     {
         if (collection == null)
         {
@@ -1756,15 +1687,14 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Scoped(
             service, 
             service);        
+        
         TryAdd(collection, descriptor);
     }
 
-    public static void TryAddScoped<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TService>(
-        this IServiceCollection collection)            
-        	where TService : class
+    public static void 
+        TryAddScoped<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(
+	        this IServiceCollection collection)            
+    	    	where TService : class
     {
         if (collection == null)
         {
@@ -1777,14 +1707,11 @@ public static class ServiceCollectionDescriptorExtensions
             typeof(TService));
     }
     
-    /* by implementation type */
-    
+    /* by implementation type */    
     public static void TryAddScoped(
         this IServiceCollection collection,
         Type service,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (collection == null)
         {
@@ -1802,17 +1729,16 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Scoped(
             service, 
             implementationType);
+        
         TryAdd(collection, descriptor);
     }
     
     public static void TryAddScoped<
         TService, 
-    	DynamicallyAccessedMembers(
-        	DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TImplementation>(
-        this IServiceCollection collection)
-            where TService : class
-            where TImplementation : class, TService
+    	DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(
+ 	       this IServiceCollection collection)
+    	        where TService : class
+        	    where TImplementation : class, TService
     {
         if (collection == null)
         {
@@ -1825,8 +1751,7 @@ public static class ServiceCollectionDescriptorExtensions
             typeof(TImplementation));
     }
 
-    /* by impl type and impl factory */
-    
+    /* by impl type and impl factory */    
     public static void TryAddScoped(
         this IServiceCollection collection,
         Type service,
@@ -1848,6 +1773,7 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Scoped(
             service, 
             implementationFactory);
+        
         TryAdd(collection, descriptor);
     }
                             
@@ -1868,13 +1794,10 @@ public static class ServiceCollectionDescriptorExtensions
 ```c#
 public static class ServiceCollectionDescriptorExtensions
 {
-    /* by service type */
-    
+    /* by service type */    
     public static void TryAddSingleton(
         this IServiceCollection collection,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type service)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type service)
     {
         if (collection == null)
         {
@@ -1888,15 +1811,14 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Singleton(
             service, 
             service);
+        
         TryAdd(collection, descriptor);
     }
     
-    public static void TryAddSingleton<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TService>(
-        this IServiceCollection collection)
-            where TService : class
+    public static void 
+        TryAddSingleton<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TService>(
+ 	       this IServiceCollection collection)
+    	        where TService : class
     {
         if (collection == null)
         {
@@ -1909,14 +1831,11 @@ public static class ServiceCollectionDescriptorExtensions
             typeof(TService));
     }
     
-    /* by impl type */
-    
+    /* by impl type */    
     public static void TryAddSingleton(
         this IServiceCollection collection,
         Type service,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type implementationType)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type implementationType)
     {
         if (collection == null)
         {
@@ -1934,17 +1853,16 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Singleton(
             service, 
             implementationType);
+        
         TryAdd(collection, descriptor);
     }
     
     public static void TryAddSingleton<
         TService, 
-    	[DynamicallyAccessedMembers(
-        	DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] TImplementation>(
-        this IServiceCollection collection)
-            where TService : class
-            where TImplementation : class, TService
+    	[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(
+	        this IServiceCollection collection)
+    	        where TService : class
+        	    where TImplementation : class, TService
     {
         if (collection == null)
         {
@@ -1957,8 +1875,7 @@ public static class ServiceCollectionDescriptorExtensions
             typeof(TImplementation));
     }
     
-    /* by impl type factory */
-    
+    /* by impl type factory */    
     public static void TryAddSingleton(
         this IServiceCollection collection,
         Type service,
@@ -1980,6 +1897,7 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Singleton(
             service, 
             implementationFactory);
+        
         TryAdd(collection, descriptor);
     }
     
@@ -1992,8 +1910,7 @@ public static class ServiceCollectionDescriptorExtensions
             ServiceDescriptor.Singleton(implementationFactory));
     }
     
-    /* by impl instance */
-        
+    /* by impl instance */        
     public static void TryAddSingleton<TService>(
         this IServiceCollection collection, 
         TService instance)
@@ -2011,11 +1928,72 @@ public static class ServiceCollectionDescriptorExtensions
         var descriptor = ServiceDescriptor.Singleton(
             typeof(TService), 
             instance);
+                
         TryAdd(collection, descriptor);
     }            
 }
 
 ```
+
+##### 2.2.5 扩展方法 - build service provider
+
+```c#
+public static class ServiceCollectionContainerBuilderExtensions
+{
+    // build sevice provider with default options
+    public static ServiceProvider BuildServiceProvider(
+        this IServiceCollection services)
+    {
+        return BuildServiceProvider(services, ServiceProviderOptions.Default);
+    }
+    
+    // build service provider with validate scopes
+    public static ServiceProvider BuildServiceProvider(
+        this IServiceCollection services, 
+        bool validateScopes)
+    {
+        return services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateScopes = validateScopes });
+    }
+          
+    public static ServiceProvider BuildServiceProvider(
+        this IServiceCollection services, 
+        ServiceProviderOptions options)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }         
+        if (options == null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
+        
+        /* 创建 service provider engine */
+        
+        IServiceProviderEngine engine;
+         
+#if !NETCOREAPP
+    	engine = new DynamicServiceProviderEngine(services);
+#else
+        if (RuntimeFeature.IsDynamicCodeCompiled)
+        {
+            engine = new DynamicServiceProviderEngine(services);
+        }
+        else
+        {
+            // Don't try to compile Expressions/IL if they are going to get interpreted
+            engine = new RuntimeServiceProviderEngine(services);
+        }
+#endif
+        // 创建 ms service provider 并返回
+        return new ServiceProvider(services, engine, options);
+    }
+}
+
+```
+
+
 
 #### 2.3 service provider
 
@@ -2050,16 +2028,14 @@ public sealed class ServiceProvider :
     {
         _engine = engine;
         
-        // 如果 service provider options 标记，
-        // 验证 service scope
+        // 如果 service provider options 标记，验证 service scope
         if (options.ValidateScopes)
         {
             _engine.InitializeCallback(this);
             _callSiteValidator = new CallSiteValidator();
         }
         
-        // 如果 service provider options 标记，
-        // 验证 service descriptor
+        // 如果 service provider options 标记，验证 service descriptor
         if (options.ValidateOnBuild)
         {
             List<Exception> exceptions = null;
@@ -2086,14 +2062,11 @@ public sealed class ServiceProvider :
         }
     }
         
-    /* 实现 IServiceProvider 的 get service 方法 */
-          
+    /* 实现 IServiceProvider 的 get service 方法 */          
     public object GetService(Type serviceType) => _engine.GetService(serviceType);
       
-    /* 实现 IServiceProviderFacotry 的方法 */
-          
-    void IServiceProviderEngineCallback.OnCreate(
-        ServiceCallSite callSite)
+    /* 实现 IServiceProviderFacotry 的方法 */          
+    void IServiceProviderEngineCallback.OnCreate(ServiceCallSite callSite)
     {
         _callSiteValidator.ValidateCallSite(callSite);
     }
@@ -2108,8 +2081,7 @@ public sealed class ServiceProvider :
             _engine.RootScope);
     }
         
-    /* dispose */
-          
+    /* dispose */          
     public void Dispose()
     {
         _engine.Dispose();
@@ -2277,8 +2249,6 @@ public static class ServiceProviderServiceExtensions
 
 ```
 
-
-
 ##### 2.3.4 service provider factory
 
 ###### 2.3.4.1 接口
@@ -2332,66 +2302,6 @@ public class DefaultServiceProviderFactory : IServiceProviderFactory<IServiceCol
 
 ```
 
-###### 2.3.4.3 扩展方法 - build service provider
-
-* 真正构建 service provider 的方法
-
-```c#
-public static class ServiceCollectionContainerBuilderExtensions
-{
-    // build sevice provider with default options
-    public static ServiceProvider BuildServiceProvider(
-        this IServiceCollection services)
-    {
-        return BuildServiceProvider(services, ServiceProviderOptions.Default);
-    }
-    
-    // build service provider with validate scopes
-    public static ServiceProvider BuildServiceProvider(
-        this IServiceCollection services, 
-        bool validateScopes)
-    {
-        return services.BuildServiceProvider(
-            new ServiceProviderOptions { ValidateScopes = validateScopes });
-    }
-          
-    public static ServiceProvider BuildServiceProvider(
-        this IServiceCollection services, 
-        ServiceProviderOptions options)
-    {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }         
-        if (options == null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
-        
-        /* 创建 service provider engine */
-        
-        IServiceProviderEngine engine;
-         
-#if !NETCOREAPP
-    	engine = new DynamicServiceProviderEngine(services);
-#else
-        if (RuntimeFeature.IsDynamicCodeCompiled)
-        {
-            engine = new DynamicServiceProviderEngine(services);
-        }
-        else
-        {
-            // Don't try to compile Expressions/IL if they are going to get interpreted
-            engine = new RuntimeServiceProviderEngine(services);
-        }
-#endif
-        // 创建 ms service provider 并返回
-        return new ServiceProvider(services, engine, options);
-    }
-}
-
-```
-
 #### 2.4 service scope
 
 ##### 2.4.1 接口
@@ -2420,8 +2330,7 @@ internal class ServiceProviderEngineScope :
     private readonly object _disposelock = new object();
         
     
-    internal Dictionary<ServiceCacheKey, object> ResolvedServices { get; } = 
-        new Dictionary<ServiceCacheKey, object>();
+    internal Dictionary<ServiceCacheKey, object> ResolvedServices { get; } = new Dictionary<ServiceCacheKey, object>();
         
     public ServiceProviderEngine Engine { get; }
     public IServiceProvider ServiceProvider => this;
@@ -2465,11 +2374,10 @@ internal class ServiceProviderEngineScope :
                     // for the rare case that an object only implements 
                     // IAsyncDisposable and may end up starving the thread pool.
                     Task.Run(() => 
-                    	((IAsyncDisposable)service)
-                             .DisposeAsync()
-                             .AsTask())
-                        	 .GetAwaiter()
-                        	 .GetResult();
+                    	((IAsyncDisposable)service).DisposeAsync()
+                              					  .AsTask())
+					                        	 .GetAwaiter()
+	                   						     .GetResult();
                 }
                 
                 ThrowHelper.ThrowObjectDisposedException();
@@ -2499,11 +2407,9 @@ internal class ServiceProviderEngineScope :
                 }
                 else
                 {
-                    throw new InvalidOperationException(
-                        SR.Format(
-                            SR.AsyncDisposableServiceDispose, 
-                            TypeNameHelper
-                            	.GetTypeDisplayName(toDispose[i])));
+                    throw new InvalidOperationException(SR.Format(     
+                        SR.AsyncDisposableServiceDispose, 
+                        TypeNameHelper.GetTypeDisplayName(toDispose[i])));
                 }
             }
         }
@@ -2549,8 +2455,7 @@ internal class ServiceProviderEngineScope :
         static async ValueTask Await(int i, ValueTask vt, List<object> toDispose)
         {
             await vt.ConfigureAwait(false);
-            // vt is acting on the disposable at index i,
-            // decrement it and move to the next iteration
+            // vt is acting on the disposable at index i, decrement it and move to the next iteration
             i--;
             
             for (; i >= 0; i--)
@@ -2582,12 +2487,9 @@ internal class ServiceProviderEngineScope :
             toDispose = _disposables;
             _disposables = null;
             
-            // Not clearing ResolvedServices here because 
-            // there might be a compilation running in background
-            // trying to get a cached singleton service instance and if it won't find
-            // it it will try to create a new one tripping the Debug.
-            // Assert in CaptureDisposable
-            // and leaking a Disposable object in Release mode
+            // Not clearing ResolvedServices here because there might be a compilation running in background trying to get 
+            // a cached singleton service instance and if it won't find it it will try to create a new one tripping the Debug.
+            // Assert in CaptureDisposable and leaking a Disposable object in Release mode
         }
         
         return toDispose;
@@ -2660,10 +2562,8 @@ internal abstract class ServiceProviderEngine :
         
     private IServiceProviderEngineCallback _callback;   
         
-    private readonly Func<Type, Func<ServiceProviderEngineScope, object>> 
-        _createServiceAccessor;               
-    internal ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object>> 
-        RealizedServices { get; }
+    private readonly Func<Type, Func<ServiceProviderEngineScope, object>> _createServiceAccessor;               
+    internal ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object>> RealizedServices { get; }
     
     internal CallSiteFactory CallSiteFactory { get; }    
     protected CallSiteRuntimeResolver RuntimeResolver { get; }
@@ -2671,8 +2571,7 @@ internal abstract class ServiceProviderEngine :
     public ServiceProviderEngineScope Root { get; }    
     public IServiceScope RootScope => Root;
     
-    protected ServiceProviderEngine(
-        IEnumerable<ServiceDescriptor> serviceDescriptors)
+    protected ServiceProviderEngine(IEnumerable<ServiceDescriptor> serviceDescriptors)
     {
         // 创建 service accessor
         _createServiceAccessor = CreateServiceAccessor;
@@ -2685,17 +2584,17 @@ internal abstract class ServiceProviderEngine :
            注册 serviceprovider，
            注册 service scope factory */
         CallSiteFactory = new CallSiteFactory(serviceDescriptors);
+        
         CallSiteFactory.Add(
             typeof(IServiceProvider), 
             new ServiceProviderCallSite());
+        
         CallSiteFactory.Add(
             typeof(IServiceScopeFactory), 
             new ServiceScopeFactoryCallSite());
         
         // 创建 realized services
-        RealizedServices = new ConcurrentDictionary<
-            Type, 
-        	Func<ServiceProviderEngineScope, object>>();
+        RealizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object>>();
     }
         
     // 创建 service accessor，
@@ -2708,8 +2607,7 @@ internal abstract class ServiceProviderEngine :
         
         if (callSite != null)
         {
-            DependencyInjectionEventSource.Log
-                						  .CallSiteBuilt(serviceType, callSite);
+            DependencyInjectionEventSource.Log.CallSiteBuilt(serviceType, callSite);
             
             _callback?.OnCreate(callSite);
             return RealizeService(callSite);
@@ -2718,13 +2616,10 @@ internal abstract class ServiceProviderEngine :
         return _ => null;
     }    
         
-    // 从 scope 解析 service object 的方法，
-    // 由派生类实现
-    protected abstract Func<ServiceProviderEngineScope, object> RealizeService(
-        ServiceCallSite callSite);
+    // 从 scope 解析 service object 的方法，由派生类实现
+    protected abstract Func<ServiceProviderEngineScope, object> RealizeService(ServiceCallSite callSite);
                                       
-    void IServiceProviderEngine.InitializeCallback(
-        IServiceProviderEngineCallback callback)
+    void IServiceProviderEngine.InitializeCallback(IServiceProviderEngineCallback callback)
     {
         _callback = callback;
     }   
@@ -2771,8 +2666,7 @@ internal abstract class ServiceProviderEngine
         catch (Exception e)
         {
             throw new InvalidOperationException(
-                $"Error while validating the service descriptor 
-                '{descriptor}': {e.Message}", 
+                $"Error while validating the service descriptor '{descriptor}': {e.Message}", 
                 e);
         }
     }
@@ -2796,10 +2690,9 @@ internal abstract class ServiceProviderEngine
             ThrowHelper.ThrowObjectDisposedException();
         }
         
-        Func<ServiceProviderEngineScope, object> realizedService = 
-            RealizedServices.GetOrAdd(
-            	serviceType, 
-            	_createServiceAccessor);
+        Func<ServiceProviderEngineScope, object> realizedService = RealizedServices.GetOrAdd(
+            serviceType, 
+            _createServiceAccessor);
         
         _callback?.OnResolve(
             serviceType, 
@@ -2836,19 +2729,15 @@ internal abstract class ServiceProviderEngine
 ```c#
 internal class RuntimeServiceProviderEngine : ServiceProviderEngine
 {
-    public RuntimeServiceProviderEngine(
-        IEnumerable<ServiceDescriptor> serviceDescriptors) : 
-    		base(serviceDescriptors)
+    public RuntimeServiceProviderEngine(IEnumerable<ServiceDescriptor> serviceDescriptors) : base(serviceDescriptors)
     {
     }
 
-    protected override Func<ServiceProviderEngineScope, object> 
-        RealizeService(ServiceCallSite callSite)
+    protected override Func<ServiceProviderEngineScope, object> RealizeService(ServiceCallSite callSite)
     {
         return scope =>
         {
-            Func<ServiceProviderEngineScope, object> realizedService = p => 
-                RuntimeResolver.Resolve(callSite, p);
+            Func<ServiceProviderEngineScope, object> realizedService = p => RuntimeResolver.Resolve(callSite, p);
             
             RealizedServices[callSite.ServiceType] = realizedService;
 
@@ -2881,11 +2770,9 @@ internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
 #endif
     }
 
-    protected override Func<ServiceProviderEngineScope, object> 
-        RealizeService(ServiceCallSite callSite)
+    protected override Func<ServiceProviderEngineScope, object> RealizeService(ServiceCallSite callSite)
     {
-        Func<ServiceProviderEngineScope, object> realizedService = 
-            ResolverBuilder.Build(callSite);
+        Func<ServiceProviderEngineScope, object> realizedService = ResolverBuilder.Build(callSite);
         
         RealizedServices[callSite.ServiceType] = realizedService;
         
@@ -2900,29 +2787,23 @@ internal abstract class CompiledServiceProviderEngine : ServiceProviderEngine
 ```c#
 internal class DynamicServiceProviderEngine : CompiledServiceProviderEngine
 {
-    public DynamicServiceProviderEngine(
-        IEnumerable<ServiceDescriptor> serviceDescriptors) : 
-    		base(serviceDescriptors)
+    public DynamicServiceProviderEngine(IEnumerable<ServiceDescriptor> serviceDescriptors) : base(serviceDescriptors)
     {
     }
     
-    protected override Func<ServiceProviderEngineScope, object> 
-        RealizeService(ServiceCallSite callSite)
+    protected override Func<ServiceProviderEngineScope, object> RealizeService(ServiceCallSite callSite)
     {
         int callCount = 0;
         return scope =>
         {
             // Resolve the result before we increment the call count, 
-            // this ensures that singletons won't cause any 
-            // side effects during the compilation of the resolve function.
+            // this ensures that singletons won't cause any side effects during the compilation of the resolve function.
             var result = RuntimeResolver.Resolve(callSite, scope);
             
             if (Interlocked.Increment(ref callCount) == 2)
             {
-                // Don't capture the ExecutionContext when 
-                // forking to build the compiled version of the resolve function
-                ThreadPool.UnsafeQueueUserWorkItem(
-                    state =>
+                // Don't capture the ExecutionContext when forking to build the compiled version of the resolve function
+                ThreadPool.UnsafeQueueUserWorkItem(state =>
                     {
                         try
                         {
@@ -2930,8 +2811,7 @@ internal class DynamicServiceProviderEngine : CompiledServiceProviderEngine
                         }
                         catch
                         {
-                            // Swallow the exception, 
-                            // we should log this via the event source in a non-patched release
+                            // Swallow the exception, we should log this via the event source in a non-patched release
                         }
                     },
                     null);
@@ -2951,10 +2831,8 @@ internal class DynamicServiceProviderEngine : CompiledServiceProviderEngine
 ```c#
 public static class ActivatorUtilities
 {
-    private static readonly MethodInfo GetServiceInfo =
-        GetMethodInfo<
-        	Func<IServiceProvider, Type, Type, bool, object?>>((sp, t, r, c) => 
-	        	GetService(sp, t, r, c));	
+    private static readonly MethodInfo GetServiceInfo = 
+        GetMethodInfo<Func<IServiceProvider, Type, Type, bool, object?>>((sp, t, r, c) => GetService(sp, t, r, c));	
         
     private static object? GetService(
         IServiceProvider sp, 
@@ -2966,16 +2844,13 @@ public static class ActivatorUtilities
         
         if (service == null && !isDefaultParameterRequired)
         {
-            string? message = 
-                $"Unable to resolve service for type '{type}' 
-                "while attempting to activate '{requiredBy}'.";
+            string? message = $"Unable to resolve service for type '{type}' while attempting to activate '{requiredBy}'.";
             throw new InvalidOperationException(message);
         }
         
         return service;
     }
-                                                                        
-    
+                                                                            
     private static MethodInfo GetMethodInfo<T>(Expression<T> expr)
     {
         var mc = (MethodCallExpression)expr.Body;
@@ -2985,16 +2860,13 @@ public static class ActivatorUtilities
     private static void ThrowMultipleCtorsMarkedWithAttributeException()
     {
         throw new InvalidOperationException(
-            $"Multiple constructors were marked with 
-            "{nameof(ActivatorUtilitiesConstructorAttribute)}.");
+            $"Multiple constructors were marked with {nameof(ActivatorUtilitiesConstructorAttribute)}.");
     }
     
     private static void ThrowMarkedCtorDoesNotTakeAllProvidedArguments()
     {
         throw new InvalidOperationException(
-            $"Constructor marked with 
-            "{nameof(ActivatorUtilitiesConstructorAttribute)} 
-            'does not accept all given argument types.");
+            $"Constructor marked with {nameof(ActivatorUtilitiesConstructorAttribute)} does not accept all given argument types.");
     }
 }
 
@@ -3026,9 +2898,7 @@ public static class ActivatorUtilities
         {
             int applyIndexStart = 0;
             int applyExactLength = 0;
-            for (int givenIndex = 0; 
-                 givenIndex != givenParameters.Length; 
-                 givenIndex++)
+            for (int givenIndex = 0; givenIndex != givenParameters.Length; givenIndex++)
             {
                 Type? givenType = givenParameters[givenIndex]?.GetType();
                 bool givenMatched = false;
@@ -3038,8 +2908,7 @@ public static class ActivatorUtilities
                      ++applyIndex)
                 {
                     if (_parameterValues[applyIndex] == null &&
-                        _parameters[applyIndex]
-                        	.ParameterType.IsAssignableFrom(givenType))
+                        _parameters[applyIndex].ParameterType.IsAssignableFrom(givenType))
                     {
                         givenMatched = true;
                         _parameterValues[applyIndex] = givenParameters[givenIndex];
@@ -3069,19 +2938,14 @@ public static class ActivatorUtilities
             {
                 if (_parameterValues[index] == null)
                 {
-                    object? value = provider.GetService(
-                        _parameters[index].ParameterType);
+                    object? value = provider.GetService(_parameters[index].ParameterType);
                     if (value == null)
                     {
-                        if (!ParameterDefaultValue.TryGetDefaultValue(
-                            	_parameters[index], 
-                            	out object? defaultValue))
+                        if (!ParameterDefaultValue.TryGetDefaultValue(_parameters[index], out object? defaultValue))
                         {
                             throw new InvalidOperationException(
-                                $"Unable to resolve service for type
-                                '{_parameters[index].ParameterType}' 
-                                'while attempting to activate 
-                                '{_constructor.DeclaringType}'.");
+                                $"Unable to resolve service for type '{_parameters[index].ParameterType}' 
+                                'while attempting to activate {_constructor.DeclaringType}'.");
                         }
                         else
                         {
@@ -3108,11 +2972,9 @@ public static class ActivatorUtilities
             }
             catch (TargetInvocationException ex) when (ex.InnerException != null)
             {
-                ExceptionDispatchInfo
-                    .Capture(ex.InnerException)
-                    .Throw();
-                // The above line will always throw, 
-                // but the compiler requires we throw explicitly.
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                
+                // The above line will always throw, but the compiler requires we throw explicitly.
                 throw;
             }
 #endif
@@ -3129,9 +2991,7 @@ public static class ActivatorUtilities
 {
     public static object CreateInstance(
         IServiceProvider provider,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type instanceType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type instanceType,
         params object[] parameters)
     {
         int bestLength = -1;
@@ -3141,13 +3001,14 @@ public static class ActivatorUtilities
         
         if (!instanceType.IsAbstract)
         {
-            foreach (ConstructorInfo? constructor in 
-                     instanceType.GetConstructors())
+            foreach (ConstructorInfo? constructor in instanceType.GetConstructors())
             {
                 var matcher = new ConstructorMatcher(constructor);
+                
                 bool isPreferred = constructor.IsDefined(
                     typeof(ActivatorUtilitiesConstructorAttribute), 
                     false);
+                
                 int length = matcher.Match(parameters);
                 
                 if (isPreferred)
@@ -3176,11 +3037,10 @@ public static class ActivatorUtilities
         if (bestLength == -1)
         {
             string? message = 
-                $"A suitable constructor for type '{instanceType}' 
-                'could not be located. Ensure the type is concrete 
-                'and all parameters of a public constructor 
-                'are either registered as services or passed as arguments. 
+                $"A suitable constructor for type '{instanceType}' could not be located. Ensure the type is concrete 
+                'and all parameters of a public constructor are either registered as services or passed as arguments. 
                 'Also ensure no extraneous arguments are provided.";
+                
             throw new InvalidOperationException(message);
         }
         
@@ -3195,10 +3055,7 @@ public static class ActivatorUtilities
 ```c#
 public static class ActivatorUtilities
 {
-    public static T CreateInstance<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] T>(
+    public static T CreateInstance<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(
         IServiceProvider provider, 
         params object[] parameters)
     {
@@ -3214,17 +3071,14 @@ public static class ActivatorUtilities
 {
     public static object GetServiceOrCreateInstance(
         IServiceProvider provider,
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type type)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type type)
     {
         return provider.GetService(type) ?? CreateInstance(provider, type);
     }
     
-    public static T GetServiceOrCreateInstance<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] T>(IServiceProvider provider)
+    public static T 
+        GetServiceOrCreateInstance<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(
+        	IServiceProvider provider)
     {
         return (T)GetServiceOrCreateInstance(provider, typeof(T));
     }                
@@ -3237,9 +3091,7 @@ public static class ActivatorUtilities
 ###### 2.6.2.1 object factory
 
 ```c#
-public delegate object ObjectFactory(
-     IServiceProvider serviceProvider, 
-     object?[]? arguments);
+public delegate object ObjectFactory(IServiceProvider serviceProvider, object?[]? arguments);
      
 ```
 
@@ -3249,21 +3101,17 @@ public delegate object ObjectFactory(
 public static class ActivatorUtilities
 {
     public static ObjectFactory CreateFactory(
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type instanceType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type instanceType,
         Type[] argumentTypes)
     {
-        /* 获取 constructor */
-        
+        /* 获取 constructor */        
         FindApplicableConstructor(
             instanceType, 
             argumentTypes, 
             out ConstructorInfo? constructor, 
             out int?[]? parameterMap);
         
-        /* 构建 expression */
-        
+        /* 构建 expression */        
         ParameterExpression? provider = Expression.Parameter(
             typeof(IServiceProvider), 
             "provider");
@@ -3283,8 +3131,7 @@ public static class ActivatorUtilities
             	provider, 
             	argumentArray);
         
-        Func<IServiceProvider, object[], object>? result = factoryLambda.Compile();
-        
+        Func<IServiceProvider, object[], object>? result = factoryLambda.Compile();        
         return result.Invoke;
     }
 }
@@ -3297,33 +3144,22 @@ public static class ActivatorUtilities
 public static class ActivatorUtilities
 {
     private static void FindApplicableConstructor(
-            [DynamicallyAccessedMembers(
-                DynamicallyAccessedMemberTypes
-                	.PublicConstructors)] Type instanceType,
-            Type[] argumentTypes,
-            out ConstructorInfo matchingConstructor,
-            out int?[] matchingParameterMap)
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type instanceType,
+        Type[] argumentTypes,
+        out ConstructorInfo matchingConstructor,
+        out int?[] matchingParameterMap)
     {
         ConstructorInfo? constructorInfo = null;
         int?[]? parameterMap = null;
         
-        if (!TryFindPreferredConstructor(
-            	instanceType, 
-            	argumentTypes, 
-            	ref constructorInfo, 
-            	ref parameterMap) &&
-            !TryFindMatchingConstructor(
-                instanceType, 
-                argumentTypes, 
-                ref constructorInfo, 
-                ref parameterMap))
+        if (!TryFindPreferredConstructor(instanceType, argumentTypes, ref constructorInfo, ref parameterMap) &&
+            !TryFindMatchingConstructor(instanceType, argumentTypes, ref constructorInfo, ref parameterMap))
         {
             string? message = 
-                $"A suitable constructor for type '{instanceType}' 
-                'could not be located. Ensure the type is concrete 
-                'and all parameters of a public constructor are 
-                'either registered as services or passed as arguments. 
+                $"A suitable constructor for type '{instanceType}' could not be located. Ensure the type is concrete 
+                'and all parameters of a public constructor are either registered as services or passed as arguments. 
                 'Also ensure no extraneous arguments are provided.";
+                
             throw new InvalidOperationException(message);
         }
         
@@ -3340,20 +3176,15 @@ public static class ActivatorUtilities
 public static class ActivatorUtilities
 {
     private static bool TryFindPreferredConstructor(
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type instanceType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type instanceType,
         Type[] argumentTypes,
         [NotNullWhen(true)] ref ConstructorInfo? matchingConstructor,
         [NotNullWhen(true)] ref int?[]? parameterMap)
     {
         bool seenPreferred = false;
-        foreach (ConstructorInfo? constructor in 
-                 instanceType.GetConstructors())
+        foreach (ConstructorInfo? constructor in instanceType.GetConstructors())
         {
-            if (constructor.IsDefined(
-                typeof(ActivatorUtilitiesConstructorAttribute), 
-                false))
+            if (constructor.IsDefined(typeof(ActivatorUtilitiesConstructorAttribute), false))
             {
                 if (seenPreferred)
                 {
@@ -3392,15 +3223,12 @@ public static class ActivatorUtilities
 public static class ActivatorUtilities
 {
     private static bool TryFindMatchingConstructor(
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes
-            	.PublicConstructors)] Type instanceType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type instanceType,
         Type[] argumentTypes,
         [NotNullWhen(true)] ref ConstructorInfo? matchingConstructor,
         [NotNullWhen(true)] ref int?[]? parameterMap)
     {
-        foreach (ConstructorInfo? constructor in 
-                 instanceType.GetConstructors())
+        foreach (ConstructorInfo? constructor in instanceType.GetConstructors())
         {
             if (TryCreateParameterMap(
                 	constructor.GetParameters(), 
@@ -3410,8 +3238,7 @@ public static class ActivatorUtilities
                 if (matchingConstructor != null)
                 {
                     throw new InvalidOperationException(
-                        $"Multiple constructors accepting all given 
-                        "argument types have been found in type '{instanceType}'. 
+                        $"Multiple constructors accepting all given argument types have been found in type '{instanceType}'. 
                         'There should only be one applicable constructor.");
                 }
                 
@@ -3457,9 +3284,7 @@ public static class ActivatorUtilities
                     continue;
                 }
                 
-                if (constructorParameters[j]
-                    	.ParameterType
-                    	.IsAssignableFrom(givenParameter))
+                if (constructorParameters[j].ParameterType.IsAssignableFrom(givenParameter))
                 {
                     foundMatch = true;
                     parameterMap[j] = i;
@@ -3526,8 +3351,7 @@ public static class ActivatorUtilities
             // when the argument would otherwise be null.
             if (hasDefaultValue)
             {
-                ConstantExpression? defaultValueExpression = 
-                    Expression.Constant(defaultValue);
+                ConstantExpression? defaultValueExpression = Expression.Constant(defaultValue);
                 constructorArguments[i] = Expression.Coalesce(
                     constructorArguments[i], 
                     defaultValueExpression);
@@ -3570,10 +3394,7 @@ var serviceProvider = serviceCollection.BuildServiceProvider();
 ##### 3.1.2 by host framework
 
 ```c#
-var hostBuilder = Host.CreateDefaultBuilder(args)
-    				  .ConfigureServices((_, services) =>
-                                         	services.Add(/**/));
-
+var hostBuilder = Host.CreateDefaultBuilder(args).ConfigureServices((_, services) => services.Add(/**/));
 var host = hostBuilder.Build();
     
 ```
