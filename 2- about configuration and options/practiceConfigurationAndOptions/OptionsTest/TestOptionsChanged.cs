@@ -24,10 +24,8 @@ namespace OptionsTest
 
 
         private void InvokeConfigProviderOnReload(IConfigurationRoot config)
-        {
-            
-
-            var    provider = config.Providers.First();
+        {            
+            var provider = config.Providers.First();
             
             var tokenInvoker = typeof(ConfigurationProvider).GetMethod("OnReload", BindingFlags.NonPublic | BindingFlags.Instance);
             tokenInvoker.Invoke(provider, null);
@@ -36,7 +34,9 @@ namespace OptionsTest
 
         // token registrations defined in "opitons monitor", with <options change token source, customized action of toptions & name>,
         // customized action was registered to a list of action, with topotins & name (named configure options)
-        // ONLY services.configure(configuration) will inject implementation of "options change token source"!
+
+        // ONLY services.configure(configuration) will inject implementation of "options change token source" in di service by default!
+        // of cause can inject customized token, which should implement "options change token source" interface
 
         [Fact]
         public void TestChangedOptions()
@@ -67,10 +67,6 @@ namespace OptionsTest
             var listAction = new SubConfigList();
             listOptions.OnChange(listener => listAction = listener);
 
-            InvokeConfigProviderOnReload(config);
-            Assert.Equal(list, listAction);
-
-
             // register on change handler of action & string
             var listActionString = new SubConfigList();
             listOptions.OnChange((list, _) =>
@@ -78,7 +74,15 @@ namespace OptionsTest
                 listActionString = list;
             });
 
-            InvokeConfigProviderOnReload(config);
+            // trigger changes of configuration
+            config.Reload();        
+            
+            /* acutally, the changing of configuration comes from provider,
+               to simulate it, we can trigger changes of configuration provider token 
+                        
+               // InvokeConfigProviderOnReload(config); */
+
+            Assert.Equal(list, listAction);                        
             Assert.Equal(list, listActionString);                        
         }
 
@@ -117,7 +121,7 @@ namespace OptionsTest
                 { "Sublist:1", "hehe2" }
             };
 
-            // build configs with name
+            // build configs
             var config1 = new ConfigurationBuilder().AddInMemoryCollection(dict1).Build();
             var config2 = new ConfigurationBuilder().AddInMemoryCollection(dict2).Build();
 
@@ -149,13 +153,13 @@ namespace OptionsTest
                 }
             });
 
-            
-            // trigger config1 changing
-            InvokeConfigProviderOnReload(config1);
+
+            // trigger config1 changing            
+            config1.Reload();
             Assert.Equal(list1, listChanged1);
 
-            // trigger config2 changing
-            InvokeConfigProviderOnReload(config2);
+            // trigger config2 changing           
+            config2.Reload();
             Assert.Equal(list2, listChanged2);
         }
     }

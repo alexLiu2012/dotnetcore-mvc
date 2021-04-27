@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using System.IO;
 using Xunit;
 
-namespace configAndOptionsTest
+namespace ConfigurationTest
 {
     public class TestBind
     {
@@ -26,34 +26,55 @@ namespace configAndOptionsTest
         }
 
 
-        /* "bind()" method will bind property of object from configuration value,
-           But not available for type which is convertable (same as "get value" method did) */
+        // "bind()" method will bind property of object from configuration value,
+        // But not available for type which is convertable (same as "get value" method did)
 
-        // bind(object) needs to pass a non-null object,
-        // the object instance will NOT override if bind failure (no related configuration exist)
+        // a non-null object as result needs to past as a parameter,        
+        // it will NOT override if bind failure (no related configuration exist)
 
+
+        // null result object will bypass the bind process!
+        [Fact]
+        public void TestBindNullResult()
+        {
+            // exist key, -> bypass the bind process, -> null
+            SubConfigList list = null;
+            Config.Bind("sublist", list);
+            Assert.Null(list);
+
+            // non exist key, -> bypass the bind process, -> null
+            string key = null;
+            Config.Bind("key", key);
+            Assert.Null(key);            
+        }
+
+        // int is convertable, cannot bind
         [Fact]
         public void TestBindInt()
-        {
-            // cannot bind to int (int is convertable)
+        {            
             int keyInt = 0;
-            Config.Bind("keyInt", keyInt);
 
+            // exist key, -> not bind for int (convertable), -> object (int) not changed
+            Config.Bind("keyInt", keyInt);
             Assert.NotEqual(23, keyInt);
+            Assert.Equal(0, keyInt);
         }
 
 
+        // string is convertable, cannot bind
         [Fact]
         public void TestBindString()
-        {
-            // cannot bind to string (string is convertable)
+        {            
             string keya = string.Empty;
-            Config.Bind("keya", keya);
 
+            // exist key, -> not bind for string convertable), -> object (string) not changed
+            Config.Bind("keya", keya);
             Assert.NotEqual("valuea", keya);
+            Assert.Equal("", keya);
         }
 
 
+        // list is binded
         [Fact]
         public void TestBindList()
         {
@@ -62,15 +83,15 @@ namespace configAndOptionsTest
                 "haha",
                 "hehe"
             };
-
-            // bind to list
+            
+            // exist key, -> bind to listBind (result)
             var listBind = new SubConfigList();
             Config.Bind("SubList", listBind);
-
-            Assert.Equal(list, listBind);
+            Assert.Equal(list, listBind);            
         }
 
 
+        // dictionary is binded
         [Fact]
         public void TestBindDictionary()
         {
@@ -81,14 +102,14 @@ namespace configAndOptionsTest
                 {"SubKeyc","SubValuec" }
             };
 
-            // bind to dictionary
+            // exist key, -> bind to dictionary
             var dictionaryBind = new SubConfigDictionary();
             Config.Bind("subDictionary", dictionaryBind);
-
             Assert.Equal(dictionary, dictionaryBind);
         }
 
 
+        // complex object is binded
         [Fact]
         public void TestBindComplex()
         {
@@ -97,11 +118,13 @@ namespace configAndOptionsTest
                 Keya = "valuea",
                 Keyb = "valueb",
                 Keyc = "valuec",
+
                 SubList = new SubConfigList()
                 {
                     "haha",
                     "hehe"
                 },
+
                 SubDictionary = new SubConfigDictionary()
                 {
                     {"SubKeya","SubValuea" },
@@ -110,10 +133,9 @@ namespace configAndOptionsTest
                 }
             };
 
-            // bind to complex type
+            // exist key, -> bind to complex type
             var configBind = new Config();
             ConfigRoot.Bind("myConfig", configBind);
-
             Assert.Equal(config, configBind);
         }
     }

@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using Xunit;
 
-namespace configAndOptionsTest
+namespace OptionsTest
 {
     public class TestOptions
     {
@@ -44,7 +44,6 @@ namespace configAndOptionsTest
             // get ioptionsSnapshot<t> (default) without "configure options, post configure options, validate options" registered
             var optionsSnapshot = Services.GetService<IOptionsSnapshot<SubConfigList>>()?.Value;
             Assert.Equal(new SubConfigList(), optionsSnapshot);
-
         }
 
         
@@ -247,12 +246,6 @@ namespace configAndOptionsTest
 
             // with name???
         }
-
-
-        [Fact]
-        public void TestOptionsMonitor()
-        {
-            ServiceCollection.Clear();            
-        }
+        
     }
 }

@@ -6,7 +6,7 @@ using System.Reflection;
 using System.Threading;
 using Xunit;
 
-namespace configAndOptionsTest
+namespace ConfigurationTest
 {
     public class TestLoadConfiguration
     {
@@ -20,56 +20,34 @@ namespace configAndOptionsTest
 
         /* key name is case insensitive */
 
-        // in configuration, data stored a dictionary,
-        // get value by indexer will actually call the "dictionary.tryget()" method, 
-        // so no exeption will be thrown even no related value found, -> return null!
+        
         [Fact]
-        public void TestGetByIndexer()
+        public void TestCreateConfiguration()
         {
-            ConfigBuilder.AddInMemoryCollection(
-                new Dictionary<string, string>()
+            // source
+            var source = new MemoryConfigurationSource()
+            {
+                InitialData = new Dictionary<string, string>()
                 {
                     { "keya", "valuea" },
                     { "keyb", "valueb" },
                     { "keyc", "valuec" }
-                });
+                }
+            };
+            
+            // provider
+            var provider = new MemoryConfigurationProvider(source);
 
-            var config = ConfigBuilder.Build();
+            // configure
+            var configure = new ConfigurationRoot(new List<IConfigurationProvider>() { provider });
 
-            // get an exist value
-            var keya = config["keya"];
+            var keya = configure["keya"];
             Assert.Equal("valuea", keya);
 
-            // get a non exist value, -> reutrn null
-            var key = config["key"];
-            Assert.Null(key);
+            var keyb = configure.GetSection("keyb")?.Value;
+            Assert.Equal("valueb", keyb);
         }
-
-
-        // "get section" method will first create a new "configuration section", then bind value to it; 
-        // even if there is no such section in the configuration, there will be always "configuration section" returned!
-        [Fact]
-        public void TestGetSection()
-        {
-            ConfigBuilder.AddInMemoryCollection(
-                new Dictionary<string, string>()
-                {
-                    { "keya", "valuea" },
-                    { "keyb", "valueb" },
-                    { "keyc", "valuec" }
-                });
-
-            var config = ConfigBuilder.Build();
-
-            // get an exist section
-            var keya = config.GetSection("keya");
-            Assert.Equal("valuea", keya.Value);
-
-            // get a non exist section, -> return configurationSection[key, null]
-            var key = config.GetSection("key");
-            Assert.NotNull(key);
-        }
-
+                               
 
         [Fact]
         public void TestInMemoryCollection()
@@ -140,12 +118,8 @@ namespace configAndOptionsTest
 
 
         // a change token defined in the base "configuration root",
-        // "reload" method will load data from the providers again, and then trigger the root token.on change,
-        // so registered customized handler into the root.token will be invoked.
-        //
-        // besides, change registrations had been registered with <provider.token, root token raise (re-create token)>,
-        // so any provider.token invoked, the root.token will be invoked as well
-        
+        // "reload" method will load data from the providers again, and then trigger the (configuration root) change token
+                                
         [Fact]
         public void TestReload()
         {
@@ -159,11 +133,11 @@ namespace configAndOptionsTest
 
             var config = ConfigBuilder.Build();
 
-            object obj = null;
-
-            // get reload token will always return a new change token
-            // register customized handler to the token, so that handler will be triggered WHEN "configurtion root.reload()" called
+            // register a reload handler to the change token of configuration
+            object obj = null;            
             config.GetReloadToken().RegisterChangeCallback(c => obj = c, "changed");
+
+            // reload to trigger the change token
             config.Reload();
             Assert.Equal("changed", (string)obj);
 
@@ -171,9 +145,14 @@ namespace configAndOptionsTest
         }
 
 
+        // "on reload" method in configuration root will reload the provider info, 
+        // but NOT trigger the provider change token!!!
+
         [Fact]
-        public void TestReloadByProvider()
+        public void TestReloadFromConfiguration()
         {
+            /* register and build configuration root */
+
             // configuration source
             var source = new MemoryConfigurationSource()
             {
@@ -184,48 +163,120 @@ namespace configAndOptionsTest
                     { "keyc", "valuec" }
                 }
             };
+
             // configuration provider
             var provider = new MemoryConfigurationProvider(source);
+
             // configuration root
             var configuration = new ConfigurationRoot(new List<IConfigurationProvider>() { provider });
 
 
-            object obj = null;
+            /* register change token handler */
 
-            // register configration provider change handler
-            provider.GetReloadToken().RegisterChangeCallback(c => { }, "");
-            // register configuration root chagne handler
-            configuration.GetReloadToken().RegisterChangeCallback(c => obj = c, "changed");
+            // register change token handler for "configration provider"
+            // (actually, nothing registered in configuration provider base)
+            object objProvider = null;
+            provider.GetReloadToken().RegisterChangeCallback(c => objProvider = c, "change from provider");
 
-            // get configuration token -reload method by reflet
-            var reloadReflected = typeof(ConfigurationProvider).GetMethod("OnReload", BindingFlags.NonPublic | BindingFlags.Instance);
+            // register change token handler for "configuration root"
+            object objConfig = null;
+            configuration.GetReloadToken().RegisterChangeCallback(c => objConfig = c, "change from config");
 
-            reloadReflected.Invoke(provider, null);
-            Assert.Equal("changed", obj);
+
+            // trigger configuration root change token
+            configuration.Reload();
+
+            // configuration provider handler not triggered!
+            Assert.Null(objProvider);
+
+            // configuration root handler triggered!
+            Assert.Equal("change from config", objConfig);            
         }
 
-        
-        // another change registerations defined in the base "file configuration provider", 
-        // <file change token, load provider (again)> was regiestered.
-        // in "Load()" method, base "file configuration provider" token will be triggered        
+
+        // but, configuration provider changes,
+        // will trigger both itself change token handler and container configuration root change token handler
+
+        [Fact]
+        public void TestReloadFromProvider()
+        {
+            /* register and build configuration root */
+
+            // configuration source
+            var source = new MemoryConfigurationSource()
+            {
+                InitialData = new Dictionary<string, string>()
+                {
+                    { "keya", "valuea" },
+                    { "keyb", "valueb" },
+                    { "keyc", "valuec" }
+                }
+            };
+
+            // configuration provider
+            var provider = new MemoryConfigurationProvider(source);
+
+            // configuration root
+            var configuration = new ConfigurationRoot(new List<IConfigurationProvider>() { provider });
+
+
+            /* register change token handler */
+
+            // register change token handler for "configration provider"
+            // (actually, nothing registered in configuration provider base)
+            object objProvider = null;
+            provider.GetReloadToken().RegisterChangeCallback(c => objProvider = c, "change from provider");
+
+            // register change token handler for "configuration root"
+            object objConfig = null;
+            configuration.GetReloadToken().RegisterChangeCallback(c => objConfig = c, "change from config");
+            
+
+            // trigger config provider "onReload" method
+            // -by reflect as it is an internal method
+            var reloadReflected = typeof(ConfigurationProvider).GetMethod("OnReload", BindingFlags.NonPublic | BindingFlags.Instance);
+            reloadReflected.Invoke(provider, null);
+
+            // configuration provider handler triggered!
+            Assert.Equal("change from provider", objProvider);
+
+            // configuration root handler triggered!
+            Assert.Equal("change from config", objConfig);                        
+        }
+
+
+        // there is no change token mapping registered in "configuration provider base",
+        // so in general configuration provider changing will NOT trigger the "configuration root" change token handler!
+        // of cause derived configuration provider can change it!
+
+        // in "file configuration provider base", a file watch token register with "load" file again action with a delay time (250ms default),
+        // so the changing of file will be re-load after the delay, and trigger the "configuration root" change token handler.
+        // register cusomized handler in "configuration root" to listener the changing!
 
         [Fact]
         public void TestReloadInFileConfiguration()
-        {            
-            var path = Path.Combine(Directory.GetCurrentDirectory(), "configReload.json");            
+        {
+            ConfigBuilder.Sources.Clear();
 
+            // register configuration file and build configuration (root)
+            var path = Path.Combine(Directory.GetCurrentDirectory(), "configReload.json");            
             ConfigBuilder.AddJsonFile(path, false, reloadOnChange: true);
 
             var config = ConfigBuilder.Build();
 
+
+            // register configuration root change token handler
             object obj = null;
             config.GetReloadToken().RegisterChangeCallback(c => obj = c, "changed");
             
+            // touch the file to trigger changing
             var content = File.ReadAllText(path);
             File.WriteAllText(path, content);
             
             // sleep thread, as provider token has a delay
-            Thread.Sleep(5000);
+            Thread.Sleep(500);
+
+
             Assert.Equal("changed", obj);            
         }
     }

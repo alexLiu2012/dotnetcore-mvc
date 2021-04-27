@@ -70,95 +70,7 @@ public interface IConfiguration
 
 ```
 
-##### 2.1.1 configuration section
-
-```c#
-public interface IConfigurationSection : IConfiguration
-{    
-    string Path { get; }          
-    string Key { get; }             
-    string Value { get; set; }
-}
-
-```
-
-###### 2.1.1.1 configuration section
-
-```c#
-public class ConfigurationSection : IConfigurationSection
-{       
-    // path
-    private readonly string _path;    
-    public string Path => _path;
-
-    // key
-    private string _key; 
-    public string Key
-    {
-        get
-        {
-            if (_key == null)
-            {
-                // Key is calculated lazily as last portion of Path
-                _key = ConfigurationPath.GetSectionKey(_path);
-            }
-            return _key;
-        }
-    }
-    
-    // value
-    private readonly IConfigurationRoot _root;
-    public string Value
-    {
-        get
-        {
-            return _root[Path];
-        }
-        set
-        {
-            _root[Path] = value;
-        }
-    }
-    
-    public string this[string key]
-    {
-        get
-        {
-            return _root[ConfigurationPath.Combine(Path, key)];
-        }
-        
-        set
-        {
-            _root[ConfigurationPath.Combine(Path, key)] = value;
-        }
-    }
-    
-    public ConfigurationSection(IConfigurationRoot root, string path)
-    {
-        if (root == null)
-        {
-            throw new ArgumentNullException(nameof(root));
-        }        
-        if (path == null)
-        {
-            throw new ArgumentNullException(nameof(path));
-        }
-        
-        _root = root;
-        _path = path;
-    }
-
-    // get section
-    public IConfigurationSection GetSection(string key) => _root.GetSection(ConfigurationPath.Combine(Path, key));        
-    // get children
-    public IEnumerable<IConfigurationSection> GetChildren() => _root.GetChildrenImplementation(Path);        
-    // get reload token
-    public IChangeToken GetReloadToken() => _root.GetReloadToken();
-}
-
-```
-
-###### 2.1.1.2 configuration extension
+##### 2.1.1 扩展方法
 
 ```c#
 public static class ConfigurationExtensions
@@ -168,18 +80,8 @@ public static class ConfigurationExtensions
     {
         return configuration?.GetSection("ConnectionStrings")?[name];
     }
-    
-    // check configuration section exist
-    public static bool Exists(this IConfigurationSection section)
-    {
-        if (section == null)
-        {
-            return false;
-        }
-        return section.Value != null || section.GetChildren().Any();
-    }
-    
-    // get required section   
+           
+    // get required section (in .net 6)
     public static IConfigurationSection GetRequiredSection(this IConfiguration configuration, string key)
     {
         if (configuration == null)
@@ -224,34 +126,130 @@ public static class ConfigurationExtensions
                 stack.Push(child);
             }
         }
-    }
-                
-    
+    }                    
 }
 
 ```
 
-
-
-##### 2.1.2 configuration root
+##### 2.1.2 configuration section（实现）
 
 ```c#
+// 扩展接口
+public interface IConfigurationSection : IConfiguration
+{    
+    string Path { get; }          
+    string Key { get; }             
+    string Value { get; set; }
+}
+
+// 实现
+public class ConfigurationSection : IConfigurationSection
+{       
+    // path
+    private readonly string _path;    
+    public string Path => _path;
+
+    // key
+    private string _key; 
+    public string Key
+    {
+        get
+        {
+            if (_key == null)
+            {
+                // Key is calculated lazily as last portion of Path
+                _key = ConfigurationPath.GetSectionKey(_path);
+            }
+            return _key;
+        }
+    }
+    
+    // root configuration
+    private readonly IConfigurationRoot _root;
+    // value
+    public string Value
+    {
+        get
+        {
+            return _root[Path];
+        }
+        set
+        {
+            _root[Path] = value;
+        }
+    }
+    
+    public string this[string key]
+    {
+        get
+        {
+            return _root[ConfigurationPath.Combine(Path, key)];
+        }
+        
+        set
+        {
+            _root[ConfigurationPath.Combine(Path, key)] = value;
+        }
+    }
+    
+    public ConfigurationSection(IConfigurationRoot root, string path)
+    {
+        if (root == null)
+        {
+            throw new ArgumentNullException(nameof(root));
+        }        
+        if (path == null)
+        {
+            throw new ArgumentNullException(nameof(path));
+        }
+        
+        _root = root;
+        _path = path;
+    }    
+    
+    /* 方法，调用 configuration root 的对应方法 */
+    
+    // get section
+    public IConfigurationSection GetSection(string key) => _root.GetSection(ConfigurationPath.Combine(Path, key));        
+    // get children
+    public IEnumerable<IConfigurationSection> GetChildren() => _root.GetChildrenImplementation(Path);        
+    // get reload token
+    public IChangeToken GetReloadToken() => _root.GetReloadToken();
+}
+
+public static class ConfigurationExtensions
+{    
+    // check configuration section exist
+    public static bool Exists(this IConfigurationSection section)
+    {
+        if (section == null)
+        {
+            return false;
+        }
+        return section.Value != null || section.GetChildren().Any();
+    }        
+}
+
+```
+
+##### 2.1.3 configuration root（实现）
+
+```c#
+// 扩展接口
 public interface IConfigurationRoot : IConfiguration
 {
     IEnumerable<IConfigurationProvider> Providers { get; }
     void Reload();            
 }
 
-```
-
-###### 2.1.2.1 configuration root
-
-```c#
+// 实现
 public class ConfigurationRoot : IConfigurationRoot, IDisposable
 {
+    // configuration provider 集合
     private readonly IList<IConfigurationProvider> _providers;
     public IEnumerable<IConfigurationProvider> Providers => _providers;
     
+    // change token 集合
     private readonly IList<IDisposable> _changeTokenRegistrations;
     private ConfigurationReloadToken _changeToken = new ConfigurationReloadToken();
             
@@ -306,31 +304,14 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
                     () => RaiseChanged()));
         }
     }
-                           
-    // get children
-    public IEnumerable<IConfigurationSection> GetChildren() => this.GetChildrenImplementation(null);
-    // get section
-    public IConfigurationSection GetSection(string key) => new ConfigurationSection(this, key);
-    // get reload token
-    public IChangeToken GetReloadToken() => _changeToken;
-                
-    public void Reload()
-    {
-        foreach (IConfigurationProvider provider in _providers)
-        {
-            provider.Load();
-        }
-        RaiseChanged();
-    }
-        
+    
     private void RaiseChanged()
     {
         // 重新创建 change token（token 只能使用一次）
         ConfigurationReloadToken previousToken = Interlocked.Exchange(ref _changeToken, new ConfigurationReloadToken());
         previousToken.OnReload();
     }
-    
-    /// <inheritdoc />
+       
     public void Dispose()
     {
         // dispose change token registrations
@@ -344,35 +325,49 @@ public class ConfigurationRoot : IConfigurationRoot, IDisposable
             (provider as IDisposable)?.Dispose();
         }
     }
-}
-
-```
-
-###### 2.1.2.2 configuration reload token
-
-```c#
-public class ConfigurationReloadToken : IChangeToken
-{
-    private CancellationTokenSource _cts = new CancellationTokenSource();        
-
-    public bool ActiveChangeCallbacks => true;        
-    public bool HasChanged => _cts.IsCancellationRequested;
+    
+    // 方法 - get reload token
+    public IChangeToken GetReloadToken() => _changeToken;
+    
+    // 方法 - reload
+    public void Reload()
+    {
+        foreach (IConfigurationProvider provider in _providers)
+        {
+            provider.Load();
+        }
         
-    public IDisposable RegisterChangeCallback(Action<object> callback, object state) => _cts.Token.Register(callback, state);        
-    public void OnReload() => _cts.Cancel();
+        RaiseChanged();
+    }
+    
+    // 方法 - get section，-> new，不为 null & 不抛出异常
+    public IConfigurationSection GetSection(string key) => new ConfigurationSection(this, key);
+                                   
+    // get children
+    public IEnumerable<IConfigurationSection> GetChildren() => this.GetChildrenImplementation(null);
+}
+
+internal static class InternalConfigurationRootExtensions
+{
+   
+    internal static IEnumerable<IConfigurationSection> GetChildrenImplementation(
+        this IConfigurationRoot root, 
+        string path)
+    {
+        return root.Providers
+       		   	   .Aggregate(Enumerable.Empty<string>(), (seed, source) => source.GetChildKeys(seed, path))
+            	   .Distinct(StringComparer.OrdinalIgnoreCase)
+            	   .Select(key => root.GetSection(path == null ? key : ConfigurationPath.Combine(path, key)));
+    }
 }
 
 ```
 
-###### 2.1.2.3 configuration root extension
+###### 2.1.3.1 扩展方法 - debug view
 
 ```c#
 public static class ConfigurationRootExtensions
-{
-    /// <summary>
-    /// Generates a human-readable view of the configuration showing where each value came from.
-    /// </summary>
-    /// <returns> The debug view. </returns>
+{    
     public static string GetDebugView(this IConfigurationRoot root)
     {
         void RecurseChildren(
@@ -429,32 +424,24 @@ public static class ConfigurationRootExtensions
 
 ```
 
-###### 2.1.2.4 internal configuration root extension
+###### 2.1.3.2 configuration reload token
 
 ```c#
-internal static class InternalConfigurationRootExtensions
+public class ConfigurationReloadToken : IChangeToken
 {
-   
-    internal static IEnumerable<IConfigurationSection> GetChildrenImplementation(
-        this IConfigurationRoot root, 
-        string path)
-    {
-        return root.Providers
-            	   .Aggregate(
-            			Enumerable.Empty<string>(),
-            			(seed, source) => source.GetChildKeys(seed, path))
-            	   .Distinct(StringComparer.OrdinalIgnoreCase)
-            	   .Select(key => root.GetSection(path == null 
-                                                  	  ? key 
-                                                      : ConfigurationPath.Combine(path, key)));
-    }
+    // 使用 cancellation token source
+    private CancellationTokenSource _cts = new CancellationTokenSource();        
+
+    public bool ActiveChangeCallbacks => true;        
+    public bool HasChanged => _cts.IsCancellationRequested;
+        
+    public IDisposable RegisterChangeCallback(Action<object> callback, object state) => _cts.Token.Register(callback, state);        
+    public void OnReload() => _cts.Cancel();
 }
 
 ```
 
 #### 2.2 configuration provider
-
-##### 2.2.1 接口
 
 ```c#
 public interface IConfigurationProvider
@@ -468,7 +455,7 @@ public interface IConfigurationProvider
 
 ```
 
-##### 2.2.2 configuration provider (base)
+##### 2.2.1 configuration provider (base)
 
 ```c#
 public abstract class ConfigurationProvider : IConfigurationProvider
@@ -565,7 +552,7 @@ public abstract class ConfigurationProvider : IConfigurationProvider
 
 ```
 
-###### 2.2.2.1 configuration key comparer
+##### 2.2.2 configuration key comparer
 
 ```c#
 public class ConfigurationKeyComparer : IComparer<string>
@@ -631,8 +618,6 @@ public class ConfigurationKeyComparer : IComparer<string>
 
 #### 2.3 configuration source
 
-##### 2.3.1 接口
-
 ```c#
 public interface IConfigurationSource
 {    
@@ -642,8 +627,6 @@ public interface IConfigurationSource
 ```
 
 #### 2.4 configuration builder
-
-##### 2.4.1接口
 
 ```c#
 public interface IConfigurationBuilder
@@ -657,12 +640,13 @@ public interface IConfigurationBuilder
 
 ```
 
-##### 2.4.2 configuration builder
+##### 2.4.1 configuration builder（实现）
 
 ```c#
 public class ConfigurationBuilder : IConfigurationBuilder
 {   
-    public IList<IConfigurationSource> Sources { get; } = new List<IConfigurationSource>();        
+    // configuration source 集合
+    public IList<IConfigurationSource> Sources { get; } = new List<IConfigurationSource>();            
     public IDictionary<string, object> Properties { get; } = new Dictionary<string, object>();
         
     public IConfigurationBuilder Add(IConfigurationSource source)
@@ -690,7 +674,7 @@ public class ConfigurationBuilder : IConfigurationBuilder
 
 ```
 
-##### 2.4.3 扩展方法 - add action
+##### 2.4.2 扩展方法 - add source (action)
 
 ```c#
 public static class ConfigurationExtensions
@@ -718,6 +702,7 @@ public static class ConfigurationBinder
 										        BindingFlags.Static | 
 										        BindingFlags.DeclaredOnly;
     
+    // convert value if possible
     private static bool TryConvertValue(
         Type type, 
         string value, 
@@ -741,10 +726,12 @@ public static class ConfigurationBinder
             {
                 return true;
             }
+            
             return TryConvertValue(Nullable.GetUnderlyingType(type), value, path, out result, out error);
         }
         
         TypeConverter converter = TypeDescriptor.GetConverter(type);
+        
         if (converter.CanConvertFrom(typeof(string)))
         {
             try
@@ -753,9 +740,7 @@ public static class ConfigurationBinder
             }
             catch (Exception ex)
             {
-                error = new InvalidOperationException(
-                    SR.Format(SR.Error_FailedBinding, path, type), 
-                    ex);
+                error = new InvalidOperationException(SR.Format(SR.Error_FailedBinding, path, type), ex);
             }
             return true;
         }
@@ -768,9 +753,7 @@ public static class ConfigurationBinder
             }
             catch (FormatException ex)
             {
-                error = new InvalidOperationException(
-                    SR.Format(SR.Error_FailedBinding, path, type), 
-                    ex);
+                error = new InvalidOperationException(SR.Format(SR.Error_FailedBinding, path, type), ex);
             }
             return true;
         }
@@ -797,8 +780,7 @@ public static class ConfigurationBinder
             }
         }
         return null;
-    }                                      
-    
+    }                                          
 }
 
 ```
@@ -818,8 +800,10 @@ public class BinderOptions
 ```c#
 public static class ConfigurationBinder
 {
+    // by t
     public static T Get<T>(this IConfiguration configuration) => configuration.Get<T>(_ => { });
         
+    // by t & options
     public static T Get<T>(
         this IConfiguration configuration, 
         Action<BinderOptions> configureOptions)
@@ -838,8 +822,10 @@ public static class ConfigurationBinder
         return (T)result;
     }
             
+    // by type
     public static object Get(this IConfiguration configuration, Type type) => configuration.Get(type, _ => { });
        
+    // by type & options
     public static object Get(
         this IConfiguration configuration, 
         Type type, 
@@ -866,14 +852,15 @@ public static class ConfigurationBinder
 ```c#
 public static class ConfigurationBinder
 {
-    // get value =T
+    // by t & default
     public static T GetValue<T>(
         this IConfiguration configuration, 
         string key)
     {
         return GetValue(configuration, key, default(T));
     }
-           
+         
+    // by t & specific default 
     public static T GetValue<T>(
         this IConfiguration configuration, 
         string key, 
@@ -882,7 +869,7 @@ public static class ConfigurationBinder
         return (T)GetValue(configuration, typeof(T), key, defaultValue);
     }
     
-    // get value =object   
+    // by type & null as default
     public static object GetValue(
         this IConfiguration configuration, 
         Type type, 
@@ -890,19 +877,23 @@ public static class ConfigurationBinder
     {
         return GetValue(configuration, type, key, defaultValue: null);
     }
-            
+         
+    // by type & specific default
     public static object GetValue(
         this IConfiguration configuration, 
         Type type, 
         string key, 
         object defaultValue)
     {
+        // 先解析 configuration section
         IConfigurationSection section = configuration.GetSection(key);
+        
         string value = section.Value;
         if (value != null)
         {
             return ConvertValue(type, value, section.Path);
         }
+        
         return defaultValue;
     }
     
@@ -911,11 +902,14 @@ public static class ConfigurationBinder
     {
         object result;
         Exception error;
+        
         TryConvertValue(type, value, path, out result, out error);
+        
         if (error != null)
         {
             throw error;
         }
+        
         return result;
     }
 }
@@ -928,15 +922,12 @@ public static class ConfigurationBinder
 public static class ConfigurationBinder
 {
     // bind configuration[key] to "instance"
-    public static void Bind(
-        this IConfiguration configuration, 
-        string key, 
-        object instance) => configuration.GetSection(key).Bind(instance);
+    public static void Bind(this IConfiguration configuration, string key, object instance) => 
+        configuration.GetSection(key).Bind(instance);
 
     // bind configuration to "instance"
-    public static void Bind(
-        this IConfiguration configuration, 
-        object instance) => configuration.Bind(instance, o => { });
+    public static void Bind(this IConfiguration configuration, object instance) => 
+        configuration.Bind(instance, o => { });
 
     // bind configuration to "instance"    
     public static void Bind(
@@ -981,13 +972,12 @@ public static class ConfigurationBinder
         object convertedValue;
         Exception error;
         
-        // 如果 config value 不为 null，（即 当前 configuration 是 configuration section 且有 value）
+        // 如果 config value 不为 null，
         if (configValue != null && 
-            // 可以转为 configuration value 为 object（即 section 没有嵌套的子节点），           
+            // 并且 config value 可以 convert，-> 返回 converted value 或抛出异常       
             TryConvertValue(type, configValue, section.Path, out convertedValue, out error))
         {
-            // -> 返回 convented value 或者 抛出异常
-            
+            // -> 返回 convented value 或者 抛出异常            
             if (error != null)
             {
                 throw error;
@@ -999,23 +989,22 @@ public static class ConfigurationBinder
         //（由上，config value 为 null，即当前 configuration section 没有 value -> 创建 value，
         //  或者 config value 不能 convert）
         
-        // 如果 config 不为 null
-        if (config != null && 
-            // 且 config 由 children，即 configuration 包含嵌套子节点
+        // 如果 config 不为 null 且有 child configuration section（嵌套 configuration，复杂类型？）
+        if (config != null &&             
             config.GetChildren().Any())
         {
-            // 如果 instance（结果）为 null，创建并 bind
+            // 如果 instance（预结果）为 null，
             if (instance == null)
             {
+                // -> try bind collection
                 // We are already done if binding to a new collection instance worked
-                instance = AttemptBindToCollectionInterfaces(type, config, options);
-                
-                // 返回 instance（不为 null）
+                instance = AttemptBindToCollectionInterfaces(type, config, options);                        
                 if (instance != null)
                 {
                     return instance;
                 }
-                // 创建 instance（预结果）
+                
+                // （由上），不能 bind collection，-> 创建 instance
                 instance = CreateInstance(type);
             }
             
@@ -1049,6 +1038,10 @@ public static class ConfigurationBinder
             }
         }
         
+        // （由上），
+        // config 为 null（即没有对应的 configuration，key 不匹配），
+        // 或者 config 没有 children（叶子节点），
+        // -> 返回 instance => bypass bind process
         return instance;
     }    
 }
@@ -6181,7 +6174,7 @@ public class ConfigurationChangeTokenSource<TOptions> : IOptionsChangeTokenSourc
 
 ```
 
-##### 4.6.3 option builder configuration extensions
+##### 4.6.3 扩展方法 - by option builder
 
 ```c#
 public static class OptionsBuilderConfigurationExtensions
@@ -6239,7 +6232,7 @@ public static class OptionsBuilderConfigurationExtensions
 
 ```
 
-##### 4.6.4 options server configuration extensions
+##### 4.6.4 扩展方法 - by options server
 
 ```c#
 public static class OptionsConfigurationServiceCollectionExtensions
