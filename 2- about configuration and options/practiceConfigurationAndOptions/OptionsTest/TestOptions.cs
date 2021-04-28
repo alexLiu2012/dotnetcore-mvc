@@ -20,6 +20,7 @@ namespace OptionsTest
         }
 
 
+        
         // "AddOptions()" method inject all options service into the di
         // "AddOptions<T>(name) method called "AddOptions()" inside, and the return new "options builder" instance
         // "options builder" will inject "configure options, post configure options, validate options" to the di
@@ -113,6 +114,21 @@ namespace OptionsTest
             Assert.Equal(list2, list2Options);            
         }
 
+
+        // get "options<t>" from di will always create a new instance and then configure it with "configure opitons, post configure options, validate options",
+        // so get "options<t>" will NOT return null
+        [Fact]
+        public void TestGetOptionsNotAdded()
+        {
+            ServiceCollection.Clear();
+
+            ServiceCollection.AddOptions();
+            Services = ServiceCollection.BuildServiceProvider();
+
+            var config = Services.GetService<IOptions<Config>>()?.Value;
+            Assert.NotNull(config);
+            Assert.Null(config.Keya);
+        }
         
         // "services.configure()" method as same as "add options<t> & options builder.configure"
         [Fact]

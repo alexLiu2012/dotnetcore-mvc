@@ -986,10 +986,10 @@ public static class ConfigurationBinder
             return convertedValue;
         }
         
-        //（由上，config value 为 null，即当前 configuration section 没有 value -> 创建 value，
-        //  或者 config value 不能 convert）
+        //（由上），config value 为 null（collection 或者 complex type），
+        //  或者 config value 不能 convert
         
-        // 如果 config 不为 null 且有 child configuration section（嵌套 configuration，复杂类型？）
+        // 如果 config 不为 null 且有 child configuration section（嵌套 configuration，是 collection）
         if (config != null &&             
             config.GetChildren().Any())
         {
@@ -1040,7 +1040,7 @@ public static class ConfigurationBinder
         
         // （由上），
         // config 为 null（即没有对应的 configuration，key 不匹配），
-        // 或者 config 没有 children（叶子节点），
+        // 或者 config 没有 children configuration（null），
         // -> 返回 instance => bypass bind process
         return instance;
     }    

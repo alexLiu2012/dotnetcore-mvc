@@ -176,14 +176,9 @@ public class ConsoleLifetime
     // on application started，   
     private void OnApplicationStarted()
     {
-        Logger.LogInformation(
-            "Application started. Press Ctrl+C to shut down.");
-        Logger.LogInformation(
-            "Hosting environment: {envName}", 
-            Environment.EnvironmentName);
-        Logger.LogInformation(
-            "Content root path: {contentRoot}", 
-            Environment.ContentRootPath);
+        Logger.LogInformation("Application started. Press Ctrl+C to shut down.");
+        Logger.LogInformation("Hosting environment: {envName}", Environment.EnvironmentName);
+        Logger.LogInformation("Content root path: {contentRoot}", Environment.ContentRootPath);
     }
     
     // on application stopping，    
@@ -663,9 +658,11 @@ public class ApplicationLifetime : IHostApplicationLifetime
     // start token = new cts.token
     private readonly CancellationTokenSource _startedSource = new CancellationTokenSource();
     public CancellationToken ApplicationStarted => _startedSource.Token;
+    
     // stopping token = new cts.token
     private readonly CancellationTokenSource _stoppingSource = new CancellationTokenSource();
     public CancellationToken ApplicationStopping => _stoppingSource.Token;
+    
     // stopped token = new cts.token
     private readonly CancellationTokenSource _stoppedSource = new CancellationTokenSource();
     public CancellationToken ApplicationStopped => _stoppedSource.Token;
@@ -680,10 +677,8 @@ public class ApplicationLifetime : IHostApplicationLifetime
     public void StopApplication()
     {
         // Lock on CTS to synchronize multiple calls to StopApplication. 
-        // This guarantees that the first call to StopApplication 
-        // and its callbacks run to completion before subsequent calls to StopApplication,
-        // which will no-op since the first call already requested cancellation, 
-        // get a chance to execute.
+        // This guarantees that the first call to StopApplication and its callbacks run to completion before subsequent calls 
+        // to StopApplication, which will no-op since the first call already requested cancellation, get a chance to execute.
         lock (_stoppingSource)
         {
             try
@@ -749,8 +744,8 @@ public class ApplicationLifetime : IHostApplicationLifetime
 
 ```c#
 public interface IHost : IDisposable
-{    
-    IServiceProvider Services { get; }            
+{        
+    IServiceProvider Services { get; }          
     Task StartAsync(CancellationToken cancellationToken = default);  
     Task StopAsync(CancellationToken cancellationToken = default);
 }
@@ -909,9 +904,8 @@ internal class Host : IHost, IAsyncDisposable
         // 遍历 hosted service
         foreach (IHostedService hostedService in _hostedServices)
         {
-            // 启动 hosted service，与 host 相同 lifetime，应为使用同一个 cancellation token
-            await hostedService.StartAsync(combinedCancellationToken)
-                			  .ConfigureAwait(false);
+            // 启动 hosted service，与 host 相同 lifetime，因为使用同一个 cancellation token
+            await hostedService.StartAsync(combinedCancellationToken).ConfigureAwait(false);
             
             // 如果是 background service，注册 background exception handler
             if (hostedService is BackgroundService backgroundService)
@@ -954,9 +948,7 @@ internal class Host : IHost, IAsyncDisposable
         _logger.Stopping();
         
         using (var cts = new CancellationTokenSource(_options.ShutdownTimeout))       
-        using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-            cts.Token, 
-            cancellationToken))
+        using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, cancellationToken))
         {
             // 创建 cancellatino token（结束 host 的 task 的 token） 
             CancellationToken token = linkedCts.Token;
@@ -1017,9 +1009,7 @@ internal class Host : IHost, IAsyncDisposable
 ```c#
 internal class Host : IHost, IAsyncDisposable
 {
-    public void Dispose() => DisposeAsync().AsTask()
-        								.GetAwaiter()
-        								.GetResult();
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
     
     public async ValueTask DisposeAsync()
     {
@@ -1161,21 +1151,21 @@ public static class HostingAbstractionsHostExtensions
 ```c#
 public interface IHostBuilder
 {        
-    // host configuration
-    IHostBuilder ConfigureHostConfiguration(Action<IConfigurationBuilder> configureDelegate);      
-    
-    // application configuration
+    // 配置 host configuration
+    IHostBuilder ConfigureHostConfiguration(Action<IConfigurationBuilder> configureDelegate);          
+    // 配置 application configuration
     IHostBuilder ConfigureAppConfiguration(Action<HostBuilderContext, IConfigurationBuilder> configureDelegate);       
-    // context & service collection
+    
+    // 注入 service
     IHostBuilder ConfigureServices(Action<HostBuilderContext, IServiceCollection> configureDelegate);   
     
-    // for service provider factory
-    IHostBuilder UseServiceProviderFactory<TContainerBuilder>(IServiceProviderFactory<TContainerBuilder> factory);     IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
+    // 配置 service provider factory
+    IHostBuilder UseServiceProviderFactory<TContainerBuilder>(IServiceProviderFactory<TContainerBuilder> factory);     
+    IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
         Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> factory);       
     
-    // for container builder
-    IHostBuilder ConfigureContainer<TContainerBuilder>(
-        Action<HostBuilderContext, TContainerBuilder> configureDelegate);
+    // 配置 (service) container builder
+    IHostBuilder ConfigureContainer<TContainerBuilder>(Action<HostBuilderContext, TContainerBuilder> configureDelegate);
         
     IDictionary<object, object> Properties { get; }  
         
@@ -1189,30 +1179,32 @@ public interface IHostBuilder
 ```c#
 public class HostBuilder : IHostBuilder
 {    
-    // host configuration & actions
+    // host configuration
     private IConfiguration _hostConfiguration;    
-    private List<Action<IConfigurationBuilder>> _configureHostConfigActions = new List<Action<IConfigurationBuilder>>();
+    // host configuration builder action 集合
+    private List<Action<IConfigurationBuilder>> _configureHostConfigActions = new List<Action<IConfigurationBuilder>>();    
     
-    // application configuration & actions
+    // application configuration
     private IConfiguration _appConfiguration;    
+    // application configuration builder action 集合
     private List<Action<HostBuilderContext, IConfigurationBuilder>> _configureAppConfigActions = 
         	new List<Action<HostBuilderContext, IConfigurationBuilder>>();
     
-    // service collection actions
+    // configure container adapter 集合
+    private List<IConfigureContainerAdapter> _configureContainerActions = 
+        	new List<IConfigureContainerAdapter>();    
+    
+    // service collection action 集合
     private List<Action<HostBuilderContext, IServiceCollection>> _configureServicesActions = 
         	new List<Action<HostBuilderContext, IServiceCollection>>();
     
-    // service provider factory -> default
+    // service provider factory adapter -> default service provider factory
     private IServiceFactoryAdapter _serviceProviderFactory = 
         new ServiceFactoryAdapter<IServiceCollection>(new DefaultServiceProviderFactory());    
     
-    // container
-    private List<IConfigureContainerAdapter> _configureContainerActions = 
-        	new List<IConfigureContainerAdapter>();    
-        
     public IDictionary<object, object> Properties { get; } = new Dictionary<object, object>();    
-    private bool _hostBuilt;        
-                   
+    
+    private bool _hostBuilt;                           
     private HostBuilderContext _hostBuilderContext;    
     private HostingEnvironment _hostingEnvironment;    
     private IServiceProvider _appServices;    
@@ -1248,6 +1240,7 @@ public interface IHostEnvironment
     string ContentRootPath { get; set; }        
     IFileProvider ContentRootFileProvider { get; set; }
 }
+
 // 实现
 public class HostingEnvironment : IHostEnvironment
 {
@@ -1256,6 +1249,7 @@ public class HostingEnvironment : IHostEnvironment
     public string ContentRootPath { get; set; }    
     public IFileProvider ContentRootFileProvider { get; set; }
 }
+
 // environment name
 public static class Environment
 {
@@ -1264,11 +1258,7 @@ public static class Environment
     public static readonly string Production = "Production";
 }
 
-```
-
-###### 2.4.2.3 host environment 扩展方法
-
-```c#
+// 扩展方法
 public static class HostEnvironmentEnvExtensions
 {
     // for general
@@ -1286,6 +1276,7 @@ public static class HostEnvironmentEnvExtensions
             environmentName,
             StringComparison.OrdinalIgnoreCase);
     }
+    
     // is development
     public static bool IsDevelopment(this IHostEnvironment hostEnvironment)
     {
@@ -1296,6 +1287,7 @@ public static class HostEnvironmentEnvExtensions
         
         return hostEnvironment.IsEnvironment(Environments.Development);
     }
+    
     // is staging    
     public static bool IsStaging(this IHostEnvironment hostEnvironment)
     {
@@ -1306,6 +1298,7 @@ public static class HostEnvironmentEnvExtensions
         
         return hostEnvironment.IsEnvironment(Environments.Staging);
     }
+    
     // is production    
     public static bool IsProduction(this IHostEnvironment hostEnvironment)
     {
@@ -1320,326 +1313,16 @@ public static class HostEnvironmentEnvExtensions
 
 ```
 
-##### 2.4.3 builde host
+###### 2.4.2.3 configure container adapter
 
 ```c#
-public class HostBuilder : IHostBuilder
-{
-    public IHost Build()
-    {
-        // 保证只构建一次        
-        if (_hostBuilt)
-        {
-            throw new InvalidOperationException(SR.BuildCalled);
-        }        
-        _hostBuilt = true;
-        
-        // a
-        BuildHostConfiguration();
-        // b
-        CreateHostingEnvironment();
-        // c
-        CreateHostBuilderContext();
-        // d
-        BuildAppConfiguration();
-        // e
-        CreateServiceProvider();
-        
-        // 从 di 解析 host
-        return _appServices.GetRequiredService<IHost>();
-    }                                                
-}
-```
-
-###### 2.4.3.1 a - build host configuration
-
-```c#
-public class HostBuilder : IHostBuilder
-{
-    // 构建 host configuration，用 host configuration actions 配置
-    private void BuildHostConfiguration()
-    {
-        // Make sure there's some default storage since there are no default providers
-        IConfigurationBuilder configBuilder = new ConfigurationBuilder().AddInMemoryCollection(); 
-        
-        foreach (Action<IConfigurationBuilder> buildAction in _configureHostConfigActions)
-        {
-            buildAction(configBuilder);
-        }
-        
-        // 构建 host configuration
-        _hostConfiguration = configBuilder.Build();
-    }
-}
-
-```
-
-###### 2.4.3.2 b - create hosting environment
-
-```c#
-public class HostBuilder : IHostBuilder
-{
-    // 构建 host environment，
-    //  - application name = from configuration / or assembly name
-    //  - environment name = from configuration / or production
-    //  - content root = from configuration / or app context base directory
-    //  - content root file provider = provider of content root
-    private void CreateHostingEnvironment()
-    {
-        // 从 host configuration 中读取相关信息，
-        // 并用其创建 host environment
-        _hostingEnvironment = new HostingEnvironment()
-        {
-            ApplicationName = _hostConfiguration[HostDefaults.ApplicationKey],
-            EnvironmentName = 
-                _hostConfiguration[HostDefaults.EnvironmentKey] ?? Environments.Production,
-            ContentRootPath = ResolveContentRootPath(
-                _hostConfiguration[HostDefaults.ContentRootKey], 
-                AppContext.BaseDirectory),
-        };
-        
-        if (string.IsNullOrEmpty(_hostingEnvironment.ApplicationName))
-        {
-            // Note GetEntryAssembly returns null for the net4x console test runner.
-            _hostingEnvironment.ApplicationName = 
-                Assembly.GetEntryAssembly()?.GetName().Name;
-        }
-        
-        _hostingEnvironment.ContentRootFileProvider = 
-            new PhysicalFileProvider(_hostingEnvironment.ContentRootPath);
-    }
-    
-    private string ResolveContentRootPath(string contentRootPath, string basePath)
-    {
-        if (string.IsNullOrEmpty(contentRootPath))
-        {
-            return basePath;
-        }
-        if (Path.IsPathRooted(contentRootPath))
-        {
-            return contentRootPath;
-        }
-        return Path.Combine(Path.GetFullPath(basePath), contentRootPath);
-    }
-}
-
-```
-
-###### 2.4.3.3 c - create host build context
-
-```c#
-public class HostBuilder : IHostBuilder
-{
-    // 构建 host builder context，
-    //  - configuration = （构建的）host configuration，（会更新为 application configuration）
-    //  - hosting environment = （构建的）host environment  
-    private void CreateHostBuilderContext()
-    {
-        _hostBuilderContext = new HostBuilderContext(Properties)
-        {
-            HostingEnvironment = _hostingEnvironment,
-            Configuration = _hostConfiguration
-        };
-    }
-}
-
-```
-
-###### 2.4.3.4 d - build app configuration
-
-```c#
-public class HostBuilder : IHostBuilder
-{
-    // 构建 application configuration，
-    private void BuildAppConfiguration()
-    {        
-        // 注入（克隆）host configuration，将 base path 设置为 content root
-        IConfigurationBuilder configBuilder = new ConfigurationBuilder()
-            .SetBasePath(_hostingEnvironment.ContentRootPath)
-            .AddConfiguration(_hostConfiguration, shouldDisposeConfiguration: true);
-        
-        // 用 configure Application actions 配置 
-        foreach (Action<HostBuilderContext, IConfigurationBuilder> buildAction in _configureAppConfigActions)
-        {
-            buildAction(_hostBuilderContext, configBuilder);
-        }
-        
-        // 构建 application configuration
-        _appConfiguration = configBuilder.Build();
-        // 注入 host builder context
-        _hostBuilderContext.Configuration = _appConfiguration;
-    }
-}
-
-```
-
-###### 2.4.3.5 e - create service provider
-
-```c#
-public class HostBuilder : IHostBuilder
-{
-    private void CreateServiceProvider()
-    {
-        var services = new ServiceCollection();
-            
-        // 注册 logging
-        services.AddLogging();
-                
-        // 注入 host environment
-        services.AddSingleton<IHostEnvironment>(_hostingEnvironment);
-        // 注入 application configuration
-        services.AddSingleton(_ => _appConfiguration);
-        // 注册 host options
-        services.AddOptions().Configure<HostOptions>(options => 
-        	{
-                options.Initialize(_hostConfiguration); 
-            });
-        
-        // 注册 host builder context
-        services.AddSingleton(_hostBuilderContext);
-               
-        // 注册 host application lifetime
-        services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
-        
-        // 注册 host lifetime（默认 console lifetime），
-        // （没有注入 console lifetime options，会抛出异常）？
-        services.AddSingleton<IHostLifetime, ConsoleLifetime>();
-        
-        // 注册 host
-        services.AddSingleton<IHost>(_ =>
-            {
-                return new Internal.Host(
-                    _appServices,
-                    _appServices.GetRequiredService<IHostApplicationLifetime>(),
-                    _appServices.GetRequiredService<ILogger<Internal.Host>>(),
-                    _appServices.GetRequiredService<IHostLifetime>(),
-                    _appServices.GetRequiredService<IOptions<HostOptions>>());
-            });
-        
-                                                        
-        // 使用 service collection actions 配置（注入 services），
-        // （可以使用 host builder context 作为参数，如 context.properties）
-        foreach (Action<HostBuilderContext, IServiceCollection> 
-                 configureServicesAction in _configureServicesActions)
-        {
-            configureServicesAction(_hostBuilderContext, services);
-        }
-        
-        /* 构建 service provider */
-        // 创建 container builder，使用 configure container actions 配置
-        object containerBuilder = _serviceProviderFactory.CreateBuilder(services);      
-        foreach (IConfigureContainerAdapter 
-                 containerAction in _configureContainerActions)
-        {
-            containerAction.ConfigureContainer(
-                _hostBuilderContext, 
-                containerBuilder);
-        }
-        
-        // 由 container builder 创建 service provider
-        _appServices = _serviceProviderFactory.CreateServiceProvider(containerBuilder);
-        
-        if (_appServices == null)
-        {
-            throw new InvalidOperationException(SR.NullIServiceProvider);
-        }
-        
-        // resolve configuration explicitly once to mark it as resolved within the service provider, 
-        // ensuring it will be properly disposed with the provider
-        _ = _appServices.GetService<IConfiguration>();
-    }
-}
-
-```
-
-###### 2.4.3.6 host default
-
-```c#
-public static class HostDefaults
-{
-    public static readonly string EnvironmentKey = "environment";
-    public static readonly string ApplicationKey = "applicationName";                    
-    public static readonly string ContentRootKey = "contentRoot";
-}
-
-```
-
-##### 2.4.4 方法 - 注入 actions（配置）
-
-```c#
-public class HostBuilder : IHostBuilder
-{
-    // 配置 host configuration
-    public IHostBuilder ConfigureHostConfiguration(
-        Action<IConfigurationBuilder> configureDelegate)
-    {
-        _configureHostConfigActions.Add(
-            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate)));
-        
-        return this;
-    }
-    
-    // 配置 host application configuration
-    public IHostBuilder ConfigureAppConfiguration(
-        Action<HostBuilderContext, IConfigurationBuilder> configureDelegate)
-    {
-        _configureAppConfigActions.Add(
-            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate)));
-        
-        return this;
-    }
-    
-    // 配置 service collection
-    public IHostBuilder ConfigureServices(
-        Action<HostBuilderContext, IServiceCollection> configureDelegate)
-    {
-        _configureServicesActions.Add(
-            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate)));
-        
-        return this;
-    }
-    
-    // 配置 container builder
-    public IHostBuilder ConfigureContainer<TContainerBuilder>(
-        Action<HostBuilderContext, TContainerBuilder> configureDelegate)
-    {
-        _configureContainerActions.Add(new ConfigureContainerAdapter<TContainerBuilder>(
-            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate))));
-        
-        return this;
-    }
-    
-    // 配置 service provider factory
-    public IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
-        IServiceProviderFactory<TContainerBuilder> factory)
-    {
-        _serviceProviderFactory = new ServiceFactoryAdapter<TContainerBuilder>(
-            factory ?? throw new ArgumentNullException(nameof(factory)));
-        
-        return this;
-    }
-    
-    public IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
-        Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> factory)
-    {
-        _serviceProviderFactory = new ServiceFactoryAdapter<TContainerBuilder>(            	
-            () => _hostBuilderContext, 
-            factory ?? throw new ArgumentNullException(nameof(factory)));
-        
-        return this;
-    }        
-}
-
-```
-
-###### 2.4.4.1 configure container adapter
-
-```c#
+// 接口
 internal interface IConfigureContainerAdapter
 {
     void ConfigureContainer(HostBuilderContext hostContext, object containerBuilder);
 }
 
+// 实现
 internal sealed class ConfigureContainerAdapter<TContainerBuilder> : IConfigureContainerAdapter
 {
     private Action<HostBuilderContext, TContainerBuilder> _action;
@@ -1657,15 +1340,17 @@ internal sealed class ConfigureContainerAdapter<TContainerBuilder> : IConfigureC
 
 ```
 
-###### 2.4.4.2 service factory adapter
+###### 2.4.2.4 service factoryadapter
 
 ```c#
+// 接口
 internal interface IServiceFactoryAdapter
 {
     object CreateBuilder(IServiceCollection services);    
     IServiceProvider CreateServiceProvider(object containerBuilder);
 }
 
+// 实现
 internal class ServiceFactoryAdapter<TContainerBuilder> : IServiceFactoryAdapter
 {
     private IServiceProviderFactory<TContainerBuilder> _serviceProviderFactory;
@@ -1716,14 +1401,330 @@ internal class ServiceFactoryAdapter<TContainerBuilder> : IServiceFactoryAdapter
 
 ```
 
-##### 2.4.5 扩展方法
 
-###### 2.4.5.1 注入配置
+
+##### 2.4.3 builde host
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    public IHost Build()
+    {
+        // 保证只构建一次        
+        if (_hostBuilt)
+        {
+            throw new InvalidOperationException(SR.BuildCalled);
+        }        
+        _hostBuilt = true;
+        
+        // a
+        BuildHostConfiguration();
+        // b
+        CreateHostingEnvironment();
+        // c
+        CreateHostBuilderContext();
+        // d
+        BuildAppConfiguration();
+        // e
+        CreateServiceProvider();
+        
+        // 从 di 解析 host
+        return _appServices.GetRequiredService<IHost>();
+    }                                                
+}
+```
+
+###### 2.4.3.1 a - build host configuration
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    // 构建 host configuration，用 host configuration actions 配置
+    private void BuildHostConfiguration()
+    {
+        // 创建 configuration builder，
+        // 并注入 in memory collection source，(default)，防止抛出异常
+        // Make sure there's some default storage since there are no default providers
+        IConfigurationBuilder configBuilder = new ConfigurationBuilder().AddInMemoryCollection(); 
+        
+        // 遍历 host configuration builder actions，配置 host configuration builder
+        foreach (Action<IConfigurationBuilder> buildAction in _configureHostConfigActions)
+        {
+            buildAction(configBuilder);
+        }
+        
+        // 构建 host configuration
+        _hostConfiguration = configBuilder.Build();
+    }
+}
+
+```
+
+###### 2.4.3.2 b - create hosting environment
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    // 构建 host environment，
+    //  - application name = from configuration / or assembly name
+    //  - environment name = from configuration / or production
+    //  - content root = from configuration / or app context base directory
+    //  - content root file provider = provider of content root
+    private void CreateHostingEnvironment()
+    {        
+        // 创建 hosting environment，
+        // 从 host configuration（a 创建的）读取信息，并注入 hosting environment
+        _hostingEnvironment = new HostingEnvironment()
+        {
+            // application name
+            ApplicationName = _hostConfiguration[HostDefaults.ApplicationKey],
+            // environment name
+            EnvironmentName = _hostConfiguration[HostDefaults.EnvironmentKey] ?? Environments.Production,
+            // content root path
+            ContentRootPath = ResolveContentRootPath(
+                _hostConfiguration[HostDefaults.ContentRootKey], 
+                AppContext.BaseDirectory),
+        };
+        
+        if (string.IsNullOrEmpty(_hostingEnvironment.ApplicationName))
+        {
+            // Note GetEntryAssembly returns null for the net4x console test runner.
+            _hostingEnvironment.ApplicationName = Assembly.GetEntryAssembly()?.GetName().Name;
+        }
+        
+        // 创建 content root file provider（physical file provider）
+        _hostingEnvironment.ContentRootFileProvider = new PhysicalFileProvider(_hostingEnvironment.ContentRootPath);
+    }
+    
+    private string ResolveContentRootPath(string contentRootPath, string basePath)
+    {
+        if (string.IsNullOrEmpty(contentRootPath))
+        {
+            return basePath;
+        }
+        if (Path.IsPathRooted(contentRootPath))
+        {
+            return contentRootPath;
+        }
+        return Path.Combine(Path.GetFullPath(basePath), contentRootPath);
+    }
+}
+
+```
+
+###### 2.4.3.3 c - create host build context
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    // 构建 host builder context，
+    //  - configuration = （构建的）host configuration，（会更新为 application configuration）
+    //  - hosting environment = （构建的）host environment  
+    private void CreateHostBuilderContext()
+    {
+        // 创建 host builder context，
+        // 注入 1- host configuration（a 创建的）；2- hosting environment（b 创建的）
+        _hostBuilderContext = new HostBuilderContext(Properties)
+        {
+            HostingEnvironment = _hostingEnvironment,
+            Configuration = _hostConfiguration
+        };
+    }
+}
+
+```
+
+###### 2.4.3.4 d - build app configuration
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    // 构建 application configuration，
+    private void BuildAppConfiguration()
+    {                
+        // 创建 (app) configuration builder，
+        // 设置 base path = content root path；注入 host configuration（a 创建的）
+        IConfigurationBuilder configBuilder = new ConfigurationBuilder()
+            .SetBasePath(_hostingEnvironment.ContentRootPath)
+            .AddConfiguration(_hostConfiguration, shouldDisposeConfiguration: true);
+        
+        // 配置 (app) configuration builder
+        foreach (Action<HostBuilderContext, IConfigurationBuilder> buildAction in _configureAppConfigActions)
+        {
+            buildAction(_hostBuilderContext, configBuilder);
+        }
+        
+        // 构建 application configuration
+        _appConfiguration = configBuilder.Build();
+        // 注入 host builder context
+        _hostBuilderContext.Configuration = _appConfiguration;
+    }
+}
+
+```
+
+###### 2.4.3.5 e - create service provider
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    private void CreateServiceProvider()
+    {
+        // 创建 service collection（default container builder）
+        var services = new ServiceCollection();
+            
+        // 注册 logging 服务
+        services.AddLogging();
+                
+        // 注入 host environment
+        services.AddSingleton<IHostEnvironment>(_hostingEnvironment);
+        // 注入 application configuration
+        services.AddSingleton(_ => _appConfiguration);
+        // 注入 host options
+        services.AddOptions().Configure<HostOptions>(options => 
+        	{
+                options.Initialize(_hostConfiguration); 
+            });        
+        // 注入 host builder context
+        services.AddSingleton(_hostBuilderContext);    
+        
+        // 注入 host application lifetime -> application life time
+        services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
+                
+        // 注入 host lifetime -> console lifetime
+        /* 没有注入 console lifetime options，会抛异常？？？*/
+        services.AddSingleton<IHostLifetime, ConsoleLifetime>();
+        
+        // 注入 host，
+        // 构造时注入从 service provider 解析的组件（由 di 控制生命周期）
+        services.AddSingleton<IHost>(_ =>
+            {
+                return new Internal.Host(
+                    _appServices,
+                    _appServices.GetRequiredService<IHostApplicationLifetime>(),
+                    _appServices.GetRequiredService<ILogger<Internal.Host>>(),
+                    _appServices.GetRequiredService<IHostLifetime>(),
+                    _appServices.GetRequiredService<IOptions<HostOptions>>());
+            });
+        
+                                                        
+        // 注入（添加的）service（可以使用 host builder context 作为参数，如 context.properties）
+        foreach (Action<HostBuilderContext, IServiceCollection> configureServicesAction in _configureServicesActions)
+        {
+            configureServicesAction(_hostBuilderContext, services);
+        }
+        
+        /* 构建 service provider */
+        // 创建 container builder，使用 configure container actions 配置
+        object containerBuilder = _serviceProviderFactory.CreateBuilder(services);      
+        foreach (IConfigureContainerAdapter containerAction in _configureContainerActions)
+        {
+            containerAction.ConfigureContainer(_hostBuilderContext, containerBuilder);
+        }
+        
+        // 由 container builder 创建 service provider
+        _appServices = _serviceProviderFactory.CreateServiceProvider(containerBuilder);
+        
+        if (_appServices == null)
+        {
+            throw new InvalidOperationException(SR.NullIServiceProvider);
+        }
+        
+        // resolve configuration explicitly once to mark it as resolved within the service provider, 
+        // ensuring it will be properly disposed with the provider
+        _ = _appServices.GetService<IConfiguration>();
+    }
+}
+
+```
+
+###### 2.4.3.6 host default
+
+```c#
+public static class HostDefaults
+{
+    public static readonly string EnvironmentKey = "environment";
+    public static readonly string ApplicationKey = "applicationName";                    
+    public static readonly string ContentRootKey = "contentRoot";
+}
+
+```
+
+##### 2.4.4 方法 
+
+```c#
+public class HostBuilder : IHostBuilder
+{
+    // 配置 host configuration（注入 host configuration builder action）
+    public IHostBuilder ConfigureHostConfiguration(
+        Action<IConfigurationBuilder> configureDelegate)
+    {
+        _configureHostConfigActions.Add(
+            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate)));
+        
+        return this;
+    }
+    
+    // 配置 host application configuration（注入 app configuration builder action）
+    public IHostBuilder ConfigureAppConfiguration(
+        Action<HostBuilderContext, IConfigurationBuilder> configureDelegate)
+    {
+        _configureAppConfigActions.Add(
+            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate)));
+        
+        return this;
+    }
+    
+    // 注入 service
+    public IHostBuilder ConfigureServices(
+        Action<HostBuilderContext, IServiceCollection> configureDelegate)
+    {
+        _configureServicesActions.Add(
+            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate)));
+        
+        return this;
+    }
+    
+    // 配置 container builder（注入 container builder action）
+    public IHostBuilder ConfigureContainer<TContainerBuilder>(
+        Action<HostBuilderContext, TContainerBuilder> configureDelegate)
+    {
+        _configureContainerActions.Add(new ConfigureContainerAdapter<TContainerBuilder>(
+            configureDelegate ?? throw new ArgumentNullException(nameof(configureDelegate))));
+        
+        return this;
+    }
+    
+    // 设置 service provider factory -> by service provider factory instance
+    public IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
+        IServiceProviderFactory<TContainerBuilder> factory)
+    {
+        _serviceProviderFactory = new ServiceFactoryAdapter<TContainerBuilder>(
+            factory ?? throw new ArgumentNullException(nameof(factory)));
+        
+        return this;
+    }
+    
+    // 设置 service provider factory -> by service provider factory func
+    public IHostBuilder UseServiceProviderFactory<TContainerBuilder>(
+        Func<HostBuilderContext, IServiceProviderFactory<TContainerBuilder>> factory)
+    {
+        _serviceProviderFactory = new ServiceFactoryAdapter<TContainerBuilder>(            	
+            () => _hostBuilderContext, 
+            factory ?? throw new ArgumentNullException(nameof(factory)));
+        
+        return this;
+    }        
+}
+
+```
+
+##### 2.4.5 扩展方法
 
 ```c#
 public static class HostingHostBuilderExtensions
 {
-    // environment
+    // 注入 environment（替换原有配置）
     public static IHostBuilder UseEnvironment(
         this IHostBuilder hostBuilder, 
         string environment)
@@ -1739,7 +1740,7 @@ public static class HostingHostBuilderExtensions
         });
     }
     
-    // content root 
+    // 注入 content root（替换原有配置）
     public static IHostBuilder UseContentRoot(
         this IHostBuilder hostBuilder, 
         string contentRoot)
@@ -1755,7 +1756,7 @@ public static class HostingHostBuilderExtensions
         });
     }   
     
-    // application configuration
+    // 配置 app configuration（注入 app configuration builder action）
     public static IHostBuilder ConfigureAppConfiguration(
         this IHostBuilder hostBuilder, 
         Action<IConfigurationBuilder> configureDelegate)
@@ -1764,7 +1765,7 @@ public static class HostingHostBuilderExtensions
             (context, builder) => configureDelegate(builder));
     }
     
-    // host options
+    // 注入 host options（合并 configure options）
     public static IHostBuilder ConfigureHostOptions(
         this IHostBuilder hostBuilder, 
         Action<HostBuilderContext, HostOptions> configureOptions)
@@ -1773,56 +1774,14 @@ public static class HostingHostBuilderExtensions
             (context, collection) => collection.Configure<HostOptions>(options => configureOptions(context, options)));
     }
            
-    public static IHostBuilder ConfigureHostOptions(this IHostBuilder hostBuilder, Action<HostOptions> configureOptions)
+    public static IHostBuilder ConfigureHostOptions(
+        this IHostBuilder hostBuilder, 
+        Action<HostOptions> configureOptions)
     {
         return hostBuilder.ConfigureServices(collection => collection.Configure(configureOptions));
     }
     
-   
-}
-
-```
-
-###### 2.4.5.2 about services proivder configuration
-
-```c#
-public static class HostingHostBuilderExtensions
-{
-    // (service) container builder
-    public static IHostBuilder ConfigureContainer<TContainerBuilder>(
-        this IHostBuilder hostBuilder, 
-        Action<TContainerBuilder> configureDelegate)
-    {
-        return hostBuilder.ConfigureContainer<TContainerBuilder>(
-            (context, builder) => configureDelegate(builder));
-    }
     
-    // default service provider
-    public static IHostBuilder UseDefaultServiceProvider(
-        this IHostBuilder hostBuilder, 
-        Action<ServiceProviderOptions> configure) => 
-        	hostBuilder.UseDefaultServiceProvider((context, options) => configure(options));
-        
-    public static IHostBuilder UseDefaultServiceProvider(
-        this IHostBuilder hostBuilder, 
-        Action<HostBuilderContext, ServiceProviderOptions> configure)
-    {
-        return hostBuilder.UseServiceProviderFactory(context =>
-        {
-            var options = new ServiceProviderOptions();
-            configure(context, options);
-            return new DefaultServiceProviderFactory(options);
-        });
-    }    
-}
-
-```
-
-###### 2.4.5.3 注入 service
-
-```c#
-public static class HostingHostBuilderExtensions
-{
     // 注入 service
     public static IHostBuilder ConfigureServices(
         this IHostBuilder hostBuilder, 
@@ -1847,12 +1806,50 @@ public static class HostingHostBuilderExtensions
     {
         return hostBuilder.ConfigureServices(
             (context, collection) => collection.AddLogging(builder => configureLogging(builder)));
-    }              
+    }                 
 }
 
 ```
 
-###### 2.4.5.4 注入 hosted services?
+##### 2.4.6 扩展方法 - 配置 service provider
+
+```c#
+public static class HostingHostBuilderExtensions
+{
+    // 配置 container builder,
+    //（使用 host builder 的 configure container 方法注入 configure container builder action
+    public static IHostBuilder ConfigureContainer<TContainerBuilder>(
+        this IHostBuilder hostBuilder, 
+        Action<TContainerBuilder> configureDelegate)
+    {
+        return hostBuilder.ConfigureContainer<TContainerBuilder>(
+            (context, builder) => configureDelegate(builder));
+    }
+    
+    // 设置 default service provider (options)
+    public static IHostBuilder UseDefaultServiceProvider(
+        this IHostBuilder hostBuilder, 
+        Action<ServiceProviderOptions> configure) => 
+        	hostBuilder.UseDefaultServiceProvider((context, options) => configure(options));
+        
+    // 设置 default service provider (options)，
+    // （使用 host builder 的 use service provider factory 方法设置 service provider factory
+    public static IHostBuilder UseDefaultServiceProvider(
+        this IHostBuilder hostBuilder, 
+        Action<HostBuilderContext, ServiceProviderOptions> configure)
+    {
+        return hostBuilder.UseServiceProviderFactory(context =>
+        {
+            var options = new ServiceProviderOptions();
+            configure(context, options);
+            return new DefaultServiceProviderFactory(options);
+        });
+    }    
+}
+
+```
+
+##### 2.4.7 扩展方法 - 注入 hosted service
 
 ```c#
 /* 注入 hosted service */
@@ -1874,9 +1871,9 @@ public static class HostingHostBuilderExtensions
     }
 ```
 
-##### 2.4.6 扩展方法 - host lifetime
+##### 2.4.8 扩展方法 - host lifetime
 
-###### 2.4.6.1 console
+###### 2.4.8.1 console
 
 ```c#
 public static class HostingHostBuilderExtensions
@@ -1925,7 +1922,7 @@ public static class HostingHostBuilderExtensions
 
 ```
 
-###### 2.4.6.2 systemd
+###### 2.4.8.2 systemd
 
 ```c#
 public static class SystemdHostBuilderExtensions
@@ -1953,7 +1950,7 @@ public static class SystemdHostBuilderExtensions
 
 ```
 
-###### 2.4.6.3 windows service
+###### 2.4.8.3 windows service
 
 ```c#
 public static class WindowsServiceLifetimeHostBuilderExtensions
@@ -1998,7 +1995,7 @@ public static class WindowsServiceLifetimeHostBuilderExtensions
 
 ```
 
-##### 2.4.7 扩展方法 - create default
+##### 2.4.9 扩展方法 - create default
 
 ```c#
 public static IHostBuilder ConfigureDefaults(this IHostBuilder builder, string[] args)
