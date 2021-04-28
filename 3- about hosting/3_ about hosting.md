@@ -1592,7 +1592,7 @@ public class HostBuilder : IHostBuilder
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
                 
         // 注入 host lifetime -> console lifetime
-        /* 没有注入 console lifetime options，会抛异常？？？*/
+        // 没有注入 console lifetime options，解析到 default
         services.AddSingleton<IHostLifetime, ConsoleLifetime>();
         
         // 注入 host，
