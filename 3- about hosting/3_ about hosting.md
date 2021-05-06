@@ -1869,6 +1869,7 @@ public static class HostingHostBuilderExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService>(implementationFactory));        
         return services;
     }
+
 ```
 
 ##### 2.4.8 扩展方法 - host lifetime

@@ -20,11 +20,11 @@ web host service 创建并管理着 web app，
 
 #### 1.2 how designed
 
-对 web host service 的配置体现在“注册服务”和“配置请求管道”上，分别对应着`ConfigureServices`和`Configure[ApplicaitonBuilder]`方法，还有配置 configuration、environment 等
+对 web host service 的配置体现在“注册服务”和“配置请求管道”上，分别对应着`ConfigureServices`和`Configure[ApplicaitonBuilder]`方法，还有配置 configuration、environment 等；
 
-可以通过封装的 startup 类配置，它可以是强约束的（实现IStartup），也可以不实现 IStartup，但必须包含`ConfigureServices`和`Configure`方法
+可以通过封装的 startup 类配置，其中 configure service 是可选的，但是必须包含 configure 方法；
 
-第三方配置 startup 通过 hosting startup 特性标记
+通过 hosting startup 特性标记的 assembly 中包含的 hosting startup 的实现也会注入 generic web host builder，并执行配置
 
 ##### 1.2.1 generic web host service
 
@@ -56,6 +56,8 @@ web host service 创建并管理着 web app，
 
 #### 2.1 startup
 
+* 过时的接口和实现
+
 ```c#
 public interface IStartup
 {    
@@ -69,29 +71,32 @@ public interface IStartup
 
 ##### 2.1.1 startup base
 
+* startup 基类，使用 service collection 作为 container
+
 ```c#
 public abstract class StartupBase : IStartup
 {            
-    // -> services provider
+    // -> services provider 
     IServiceProvider IStartup.ConfigureServices(IServiceCollection services)
     {
         // 配置 service collection（注册服务）
         ConfigureServices(services);
+        // 创建 service provider
         return CreateServiceProvider(services);
     }
     
-    // 在派生类重写 create service provider 方法
+    /* 如果使用其他 service container，在派生类重写 create service provider 方法 */
     public virtual IServiceProvider CreateServiceProvider(IServiceCollection services)
     {
         return services.BuildServiceProvider();
     }
     
-    // configure services（注册服务）
+    // configure services（注册服务）- for 3.0+
     public virtual void ConfigureServices(IServiceCollection services)
     {
     }
     
-    // configure（配置管道）
+    // configure（配置管道，在派生类实现）
     public abstract void Configure(IApplicationBuilder app);                  
 }
 
@@ -99,26 +104,31 @@ public abstract class StartupBase : IStartup
 
 ##### 2.1.2 startup base of t
 
+* startup t 基类，使用指定的 container builder
+
 ```c#
 public abstract class StartupBase<TBuilder> : StartupBase where TBuilder : notnull
-{
-   
-    private readonly IServiceProviderFactory<TBuilder> _factory;            
+{   
+    private readonly IServiceProviderFactory<TBuilder> _factory;         
+    
     public StartupBase(IServiceProviderFactory<TBuilder> factory)
     {
         // 注入 service provider factory of t
         _factory = factory;
     }
         
-    // 重写 create service provider
+    /* 用 service provider factory 创建 service provider */
     public override IServiceProvider CreateServiceProvider(IServiceCollection services)
     {
+        // 创建 container builder
         var builder = _factory.CreateBuilder(services);
+        // 配置 container builder
         ConfigureContainer(builder);
+        // 创建 service provider
         return _factory.CreateServiceProvider(builder);
     }
         
-    // 在派生类实现（配置 container）
+    /* 配置 container builder（可选，在派生类重写）*/
     public virtual void ConfigureContainer(TBuilder builder)
     {
     }
@@ -130,11 +140,10 @@ public abstract class StartupBase<TBuilder> : StartupBase where TBuilder : notnu
 
 ###### 2.1.3.1 delegate startup
 
-* configure service 的返回类型是 void
+* 使用 service collection 作为 container builder
+* 通过注入 application builder action 配置
 
 ```c#
-// 使用 service collection 作为 container，不需要重写 configure container
-// by "application builder action"
 public class DelegateStartup : StartupBase<IServiceCollection>
 {        
     private Action<IApplicationBuilder> _configureApp;   
@@ -147,7 +156,7 @@ public class DelegateStartup : StartupBase<IServiceCollection>
         _configureApp = configureApp;
     }
             
-    // 重写 configure application builder 方法，即注入的 application builder action
+    // 使用注入的 application builder action 配置 application builder
     public override void Configure(IApplicationBuilder app) => _configureApp(app);
 }
 
@@ -155,23 +164,26 @@ public class DelegateStartup : StartupBase<IServiceCollection>
 
 ###### 2.1.3.2 convention based startup
 
-* configure service 的返回类型是 service provider
+* 通过传入 startup method，
+* 1- 注入 service（自动 build 并返回 service provider）；2- 配置 application builder
 
 ```c#
 internal class ConventionBasedStartup : IStartup
 {    
     private readonly StartupMethods _methods;    
+    
     public ConventionBasedStartup(StartupMethods methods)
     {
         // 注入 startup method
         _methods = methods;
     }    
     
-    // 使用 startup method 的 configure services
+    // 使用 startup method 的 configure services delegate （有返回值 service provider）
     public IServiceProvider ConfigureServices(IServiceCollection services)
     {
         try
         {
+            /* return servcie provider !!! */
             return _methods.ConfigureServicesDelegate(services);
         }
         catch (Exception ex)
@@ -185,7 +197,7 @@ internal class ConventionBasedStartup : IStartup
         }
     }    
     
-    // 使用 startup method 的 configure
+    // 使用 startup method 的 configure delegate 
     public void Configure(IApplicationBuilder app)
     {
         try
@@ -211,11 +223,12 @@ internal class ConventionBasedStartup : IStartup
 ```c#
 internal class StartupMethods
 {
+    // 包含 startup method 的类型实例，可空
     public object? StartupInstance { get; }
     
-    // configure service
+    // configure service 委托
     public Func<IServiceCollection, IServiceProvider> ConfigureServicesDelegate { get; }       
-    // configure
+    // configure 委托
     public Action<IApplicationBuilder> ConfigureDelegate { get; }
     
     public StartupMethods(
@@ -239,12 +252,14 @@ internal class StartupMethods
 ```c#
 public interface IWebHostBuilder
 {   
-    // 配置 application configuration
+    // 注入、配置 application configuration
     IWebHostBuilder ConfigureAppConfiguration(Action<WebHostBuilderContext, IConfigurationBuilder> configureDelegate);
-    // 配置 services（返回 void）
+    
+    // 配置 services（返回 void！！！）
     IWebHostBuilder ConfigureServices(Action<IServiceCollection> configureServices);        
     IWebHostBuilder ConfigureServices(Action<WebHostBuilderContext, IServiceCollection> configureServices);
-    // settings    
+    
+    // get/set settings    
     string? GetSetting(string key);      
     IWebHostBuilder UseSetting(string key, string? value);
    
@@ -264,14 +279,21 @@ public class WebHostBuilderContext
 
 ```
 
-##### 2.2.2 扩展方法 - 注入 settings
+###### web host builder options?
+
+```c#
+
+```
+
+
+
+##### 2.2.2 扩展方法 - 注入 (settings)
 
 ```c#
 public static class HostingAbstractionsWebHostBuilderExtensions
 {
-    // startup assembly name
-    [RequiresUnreferencedCode(
-        "Types and members the loaded assembly depends on might be removed.")]
+    // 注入 startup assembly name
+    [RequiresUnreferencedCode("Types and members the loaded assembly depends on might be removed.")]
     public static IWebHostBuilder UseStartup(
         this IWebHostBuilder hostBuilder, 
         string startupAssemblyName)
@@ -285,7 +307,7 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             			 .UseSetting(WebHostDefaults.StartupAssemblyKey, startupAssemblyName);
     }
     
-    // capture startup errors (flag)
+    // 注入 capture startup errors (flag)
     public static IWebHostBuilder CaptureStartupErrors(
         this IWebHostBuilder hostBuilder, 
         bool captureStartupErrors)
@@ -295,7 +317,7 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             captureStartupErrors ? "true" : "false");
     }
     
-    // environment (dev/stage/prod)
+    // 注入 environment (dev/stage/prod)
     public static IWebHostBuilder UseEnvironment(
         this IWebHostBuilder hostBuilder, 
         string environment)
@@ -305,12 +327,10 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             throw new ArgumentNullException(nameof(environment));
         }
         
-        return hostBuilder.UseSetting(
-            WebHostDefaults.EnvironmentKey, 
-            environment);
+        return hostBuilder.UseSetting(WebHostDefaults.EnvironmentKey, environment);
     }
         
-    // (web host) content root
+    // 注入 (web host) content root
     public static IWebHostBuilder UseContentRoot(
         this IWebHostBuilder hostBuilder, 
         string contentRoot)
@@ -320,12 +340,10 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             throw new ArgumentNullException(nameof(contentRoot));
         }
         
-        return hostBuilder.UseSetting(
-            WebHostDefaults.ContentRootKey, 
-            contentRoot);
+        return hostBuilder.UseSetting(WebHostDefaults.ContentRootKey, contentRoot);
     }
         
-    // web root
+    // 注入 web root
     public static IWebHostBuilder UseWebRoot(
         this IWebHostBuilder hostBuilder, 
         string webRoot)
@@ -335,12 +353,10 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             throw new ArgumentNullException(nameof(webRoot));
         }
         
-        return hostBuilder.UseSetting(
-            WebHostDefaults.WebRootKey, 
-            webRoot);
+        return hostBuilder.UseSetting(WebHostDefaults.WebRootKey, webRoot);
     }
         
-    // url
+    // 注入 url
     public static IWebHostBuilder UseUrls(
         this IWebHostBuilder hostBuilder, 
         params string[] urls)
@@ -350,12 +366,10 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             throw new ArgumentNullException(nameof(urls));
         }
         
-        return hostBuilder.UseSetting(
-            WebHostDefaults.ServerUrlsKey, 
-            string.Join(';', urls));
+        return hostBuilder.UseSetting(WebHostDefaults.ServerUrlsKey, string.Join(';', urls));
     }
         
-    // prefer url
+    // 注入 prefer url
     public static IWebHostBuilder PreferHostingUrls(
         this IWebHostBuilder hostBuilder, 
         bool preferHostingUrls)
@@ -365,7 +379,7 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             preferHostingUrls ? "true" : "false");
     }
         
-    // suppress status message (flag)
+    // 注入 suppress status message (flag)
     public static IWebHostBuilder SuppressStatusMessages(
         this IWebHostBuilder hostBuilder, 
         bool suppressStatusMessages)
@@ -375,7 +389,7 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             suppressStatusMessages ? "true" : "false");
     }
         
-    // shutdown timeout
+    // 注入 shutdown timeout
     public static IWebHostBuilder UseShutdownTimeout(
         this IWebHostBuilder hostBuilder, 
         TimeSpan timeout)
@@ -385,15 +399,14 @@ public static class HostingAbstractionsWebHostBuilderExtensions
             ((int)timeout.TotalSeconds).ToString(CultureInfo.InvariantCulture));
     }
     
-    // configuration
+    // 注入 configuration
     public static IWebHostBuilder UseConfiguration(
         this IWebHostBuilder hostBuilder, 
         IConfiguration configuration)
     {
         // 遍历 configuration（kv pair），
         foreach (var setting in configuration.AsEnumerable(makePathsRelative: true))
-        {
-            // 注入 web host builder 的 setting
+        {            
             hostBuilder.UseSetting(setting.Key, setting.Value);
         }
         
@@ -403,12 +416,12 @@ public static class HostingAbstractionsWebHostBuilderExtensions
 
 ```
 
-##### 2.2.3 扩展方法 - 注入服务
+##### 2.2.3 扩展方法 - 基础服务
 
 ```c#
 public static class WebHostBuilderExtensions
 { 
-    // 注入 logging，with action<logging builder>
+    // 配置 logging，by action<logging builder>
     public static IWebHostBuilder ConfigureLogging(
         this IWebHostBuilder hostBuilder, 
         Action<ILoggingBuilder> configureLogging)
@@ -416,7 +429,7 @@ public static class WebHostBuilderExtensions
         return hostBuilder.ConfigureServices(collection => collection.AddLogging(configureLogging));
     }
       
-    // 注入 logging，with action<builder context, logging builder>
+    // 配置 logging，by action<builder context, logging builder>
     public static IWebHostBuilder ConfigureLogging(
         this IWebHostBuilder hostBuilder, 
         Action<WebHostBuilderContext, ILoggingBuilder> configureLogging)
@@ -428,7 +441,7 @@ public static class WebHostBuilderExtensions
     
 public static class HostingAbstractionsWebHostBuilderExtensions
 {           
-    // 注入 server, with server instance
+    // 注入 server, by server instance
     public static IWebHostBuilder UseServer(
         this IWebHostBuilder hostBuilder, 
         IServer server)
@@ -446,11 +459,11 @@ public static class HostingAbstractionsWebHostBuilderExtensions
     }
 }
 
-// 其他 server
+// use 其他 server
 
 ```
 
-##### 2.2.4 扩展方法 - 配置 application configuration
+##### 2.2.4 扩展方法 - 注入/配置 app configuration
 
 ```c#
 public static class WebHostBuilderExtensions
@@ -491,6 +504,7 @@ public static class WebHostBuilderExtensions
             configureApp.GetMethodInfo().DeclaringType!.Assembly.GetName().Name!);
     }
     
+    /* real did */
     // wtih action & startup assembly name
     private static IWebHostBuilder Configure(
         this IWebHostBuilder hostBuilder, 
@@ -502,23 +516,23 @@ public static class WebHostBuilderExtensions
             throw new ArgumentNullException(nameof(configureApp));
         }
         
-        // 注入 setting [applicationKey, startup assembly name]
-        hostBuilder.UseSetting(
-            WebHostDefaults.ApplicationKey, 
-            startupAssemblyName);
+        // 注入 startup assembly name [applicationKey, startup assembly name]
+        hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
         
-        // 如果 builder 实现了 support startup 接口，使用 support startup 的 configure 方法         
+        // 如果 builder 实现了 support startup 接口，使用 support startup 的 configure 方法并返回！        
         if (hostBuilder is ISupportsStartup supportsStartup)
         {
             return supportsStartup.Configure(configureApp);
         }
         
-        // （由上，否则），注入 service <IStarup, delegate startup> 
+        // （由上，否则），注入 service delegate startup
+        // （可以注册多个？？？）
         return hostBuilder.ConfigureServices((context, services) =>            
             {
                 services.AddSingleton<IStartup>(sp =>
                 {
                     return new DelegateStartup(
+                        // 从 sp（host 的 service provider 解析 service provider factory <service collection>
                         sp.GetRequiredService<IServiceProviderFactory<IServiceCollection>>(), 
                         (app => configureApp(context, app)));
                 });
@@ -541,6 +555,7 @@ public static class WebHostBuilderExtensions
         return hostBuilder.UseDefaultServiceProvider((context, options) => configure(options));
     }
     
+    /* real did */
     // with action<builder context, servie proivder options>
     public static IWebHostBuilder UseDefaultServiceProvider(
         this IWebHostBuilder hostBuilder, 
@@ -552,11 +567,15 @@ public static class WebHostBuilderExtensions
         {
             return supportsDefaultServiceProvider.UseDefaultServiceProvider(configure);
         }
-        // （由上，否则），替换 service <IServiceProviderFactory, default service provider factory>
+        
+        // （由上，否则），注入新的 default service provider factory <service collection> with options
         return hostBuilder.ConfigureServices((context, services) =>                                     	
             {
+                // 创建并配置 service provider options
                 var options = new ServiceProviderOptions();
-                configure(context, options);                
+                configure(context, options);      
+                
+                // 创建新的 service provider factory，替换原有服务
                 services.Replace(ServiceDescriptor.Singleton<IServiceProviderFactory<IServiceCollection>>(
                     new DefaultServiceProviderFactory(options)));
         	});
@@ -570,19 +589,24 @@ public static class WebHostBuilderExtensions
 ```c#
 internal interface ISupportsUseDefaultServiceProvider
 {
-    IWebHostBuilder UseDefaultServiceProvider(
-        Action<WebHostBuilderContext, 
-        ServiceProviderOptions> configure);
+    IWebHostBuilder UseDefaultServiceProvider(Action<WebHostBuilderContext, ServiceProviderOptions> configure);
 }
+
+```
+
+###### 2.2.6.2 service provider options?
+
+```c#
 
 ```
 
 ##### 2.2.7 扩展方法 - use startup
 
+###### 2.2.7.1 by instance factory
+
 ```c#
 public static class WebHostBuilderExtensions
-{        
-    // with func<builder context, tstartup>
+{
     public static IWebHostBuilder UseStartup<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)]TStartup>(
         this IWebHostBuilder hostBuilder, 
         Func<WebHostBuilderContext, TStartup> startupFactory) 
@@ -593,50 +617,63 @@ public static class WebHostBuilderExtensions
             throw new ArgumentNullException(nameof(startupFactory));
         }
         
-        // 解析 startup assembly name
-        var startupAssemblyName = 
-            startupFactory.GetMethodInfo().DeclaringType!.Assembly.GetName().Name;                
-        // 注入 setting [application key, startup assembly name]
-        hostBuilder.UseSetting(
-            WebHostDefaults.ApplicationKey, 
-            startupAssemblyName);
+        // （从 startup instance factory func）解析 startup assembly name
+        var startupAssemblyName = startupFactory.GetMethodInfo().DeclaringType!.Assembly.GetName().Name;     
+                
+        // 注入 startup assembly name [application key, startup assembly name]
+        hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
         
-        // 如果 builder 实现了 support startup 接口，使用 support startup 的 use startup 方法      
+        // 如果 web host builder 实现了 support startup 接口，
+        // -> 使用 support startup 的 use startup(factory func) 方法      
         if (hostBuilder is ISupportsStartup supportsStartup)
         {
             return supportsStartup.UseStartup(startupFactory);
         }
         
-        // （由上，否则），注入 service <IStartup, convention based startup>
+        /* 过时 */
+        // （由上），否则，即 web host builder 没有实现 support startup 接口，
+        // -> 注入 convention startup service
         return hostBuilder.ConfigureServices((context, services) =>
         	{
                 services.AddSingleton(
                     typeof(IStartup), 
+                    // ! service provider from IHost !
                     sp =>
                     	{
-                            // 由传入的 startup factory 创建 startup instance
+                            // 由 startup factory 创建 startup instance
                             var instance = startupFactory(context) ?? throw new InvalidOperationException(
                                 "The specified factory returned null startup instance.");
                             
                             // 解析 hosting environment
                             var hostingEnvironment = sp.GetRequiredService<IHostEnvironment>();
                             
+                            // 如果 startup instance 实现了 IStartup 接口，-> 直接返回
                             // Check if the instance implements IStartup before wrapping
                             if (instance is IStartup startup)
                             {
                                 return startup;
                             }
                             
-                            // 创建 convention based startup
-                            return new ConventionBasedStartup(StartupLoader.LoadMethods(
-                                sp, 
-                                instance.GetType(),
-                                hostingEnvironment.EnvironmentName, 
-                                instance));
+                            // （由上，否则），创建 convention based startup
+                            return new ConventionBasedStartup(
+                                StartupLoader.LoadMethods(
+                                    // ! servier provider from IHost !
+                                    sp, 
+                                    instance.GetType(),
+                                    hostingEnvironment.EnvironmentName, 
+                                    instance));
                         });
             });
     }
-    
+}
+
+```
+
+###### 2.2.7.2 by startup type
+
+```c#
+public static class WebHostBuilderExtensions
+{           
     // with tstart
     public static IWebHostBuilder UseStartup<[DynamicallyAccessedMembers(StartupLinkerOptions.Accessibility)]TStartup>(
         this IWebHostBuilder hostBuilder) 
@@ -645,7 +682,7 @@ public static class WebHostBuilderExtensions
         return hostBuilder.UseStartup(typeof(TStartup));
     }        
     
-    // type t
+    // with type t
     public static IWebHostBuilder UseStartup(
         this IWebHostBuilder hostBuilder, 
         [DynamicallyAccessedMembers(StartupLinkerOptions.Accessibility)] Type startupType)
@@ -655,39 +692,46 @@ public static class WebHostBuilderExtensions
             throw new ArgumentNullException(nameof(startupType));
         }
         
-        // 解析 startup assembly name
-        var startupAssemblyName = startupType.Assembly.GetName().Name;        
-        // 注入 setting [application key, startup assembly name]
-        hostBuilder.UseSetting(
-            WebHostDefaults.ApplicationKey, 
-            startupAssemblyName);
+        // （从 startup type）解析 startup assembly name
+        var startupAssemblyName = startupType.Assembly.GetName().Name;      
         
-        // 如果 builder 实现了 support startup 接口，使用 support startup 的 use startup 方法      
+        // 注入 startup assembly name [application key, startup assembly name]
+        hostBuilder.UseSetting(WebHostDefaults.ApplicationKey, startupAssemblyName);
+        
+        // 如果 web host builder 实现了 support startup 接口，使用 support startup 的 use startup(startup_type) 方法      
         if (hostBuilder is ISupportsStartup supportsStartup)
         {
             return supportsStartup.UseStartup(startupType);
         }
         
-        // （由上，否则），注册 service <IStartup, convention based startup>
+        /* 过时 */
+        // （由上），否则，即 web host builder 没有实现 support startup 接口，
+        // -> 注册 convention based startup
         return hostBuilder.ConfigureServices(services =>
             {
+                // 如果 startup type 实现了 IStartup 接口，-> 直接返回
                 if (typeof(IStartup).IsAssignableFrom(startupType))
                 {
                     services.AddSingleton(typeof(IStartup), startupType);
                 }
+                // 否则，创建 convention based startup
                 else
                 {
                     services.AddSingleton(
                         typeof(IStartup), 
+                        // ! service provider from IHost !
                         sp =>
                         	{
                                 // 解析 hosting environment
-                                var hostingEnvironment = sp.GetRequiredService<IHostEnvironment>();                                
+                                var hostingEnvironment = sp.GetRequiredService<IHostEnvironment>();      
+                                
                                 // 创建 convention based startup
-                                return new ConventionBasedStartup(StartupLoader.LoadMethods(
-                                    sp, 
-                                    startupType,
-                                    hostingEnvironment.EnvironmentName));
+                                return new ConventionBasedStartup(
+                                    StartupLoader.LoadMethods(
+                                        // ! service provider from IHost !
+                                        sp, 
+                                        startupType,
+                                        hostingEnvironment.EnvironmentName));
                             });
                 }
             });
@@ -696,17 +740,26 @@ public static class WebHostBuilderExtensions
 
 ```
 
-###### 2.2.7.1 support startup
+###### 2.2.7.3 support startup
 
 ```c#
 internal interface ISupportsStartup
 {    
+    // 配置 application builder
     IWebHostBuilder Configure(Action<WebHostBuilderContext, IApplicationBuilder> configure);
        
+    // use startup - by startup type
     IWebHostBuilder UseStartup([DynamicallyAccessedMembers(StartupLinkerOptions.Accessibility)] Type startupType);   
+    // use startup - by startup (instance) factory
     IWebHostBuilder UseStartup<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)]TStartup>(
         Func<WebHostBuilderContext, TStartup> startupFactory);
 }
+
+```
+
+###### 2.2.7.4 startup linker options?
+
+```c#
 
 ```
 
@@ -715,18 +768,20 @@ internal interface ISupportsStartup
 ```c#
 internal class StartupLoader
 {
-    // a- load method
+    // 方法a- load method
     public static StartupMethods LoadMethods(
         IServiceProvider hostingServiceProvider, 
         [DynamicallyAccessedMembers(StartupLinkerOptions.Accessibility)] Type startupType, 
         string environmentName, 
         object? instance = null)
     {
-        // configure method builder
+        // 解析 configure application builder 的 delegate
         var configureMethod = FindConfigureDelegate(startupType, environmentName);
-        // configure service builder
+        
+        // 解析 configure services 的 delegate
         var servicesMethod = FindConfigureServicesDelegate(startupType, environmentName);
-        // configure container 
+        
+        // 解析 configure container 的 delegate
         var configureContainerMethod = FindConfigureContainerDelegate(startupType, environmentName);
         
         // 确保 startup type instance 
@@ -737,19 +792,19 @@ internal class StartupLoader
             instance = ActivatorUtilities.GetServiceOrCreateInstance(hostingServiceProvider, startupType);
         }
         
-        // The type of the TContainerBuilder. 
+        // 解析 TContainerBuilder 类型（configure container delegate 的定义(class = container)类型）
         // If there is no ConfigureContainer method we can just use object as it's not going to be used for anything.
         var type = configureContainerMethod.MethodInfo != null 
             ? configureContainerMethod.GetContainerType() 
             : typeof(object);
         
-        // 创建 configure service delegate builder（service collection => servcie provider）
+        // 创建 configure service delegate (service collection => servcie provider）的 builder
         var builder = (ConfigureServicesDelegateBuilder)Activator.CreateInstance(
-            typeof(ConfigureServicesDelegateBuilder<>).MakeGenericType(type),
-            hostingServiceProvider,
-            // configure service builder
-            servicesMethod,
-            // configure container builder
+            typeof(ConfigureServicesDelegateBuilder<>).MakeGenericType(type),	
+            hostingServiceProvider,		
+            // configure services delegate
+            servicesMethod,				
+            // configure container delegate
             configureContainerMethod,
             instance)!;
         
@@ -762,7 +817,7 @@ internal class StartupLoader
             builder.Build());
     }
     
-    // b- find startup type    
+    // 方法b- find startup type    
     [UnconditionalSuppressMessage(
         "ReflectionAnalysis", 
         "IL2026:RequiresUnreferencedCode", 
@@ -861,6 +916,7 @@ internal class StartupLoader
         var methods = startupType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
         var selectedMethods = methods.Where(method => method.Name.Equals(methodNameWithEnv, StringComparison.OrdinalIgnoreCase))
             					   .ToList();
+        // 找到多余1个 method，-> 异常
         if (selectedMethods.Count > 1)
         {
             throw new InvalidOperationException(
@@ -872,6 +928,7 @@ internal class StartupLoader
         {
             selectedMethods = methods.Where(method => method.Name.Equals(methodNameWithNoEnv, StringComparison.OrdinalIgnoreCase))
 		           				   .ToList();
+            // 找到多余1个 method，-> 异常
             if (selectedMethods.Count > 1)
             {
                 throw new InvalidOperationException(
@@ -879,7 +936,7 @@ internal class StartupLoader
             }
         }
         
-        // 如果不成功（没找到），-> 抛出异常
+        // 如果不成功（没找到），标记了 required，-> 抛出异常
         var methodInfo = selectedMethods.FirstOrDefault();
         if (methodInfo == null)
         {
@@ -918,24 +975,29 @@ internal class StartupLoader
 
 ##### 2.3.1 configure builder (delegate)
 
+* 配置 application builder 的 delegate
+
 ###### 2.3.1.1 configure builder
 
 ```c#
 internal class ConfigureBuilder
-{
-    // 注入 method info
-    public MethodInfo MethodInfo { get; }        
+{    
+    public MethodInfo MethodInfo { get; }     
+    
     public ConfigureBuilder(MethodInfo configure)
     {
+        // 注入 method info
         MethodInfo = configure;
     }
     
     // build => application builder action !!!
-    public Action<IApplicationBuilder> Build(object? instance) => 
-        builder => Invoke(instance, builder);
+    // （instance 是 startup instance）
+    public Action<IApplicationBuilder> Build(object? instance) => builder => Invoke(instance, builder);
     
     private void Invoke(object? instance, IApplicationBuilder builder)
     {
+        /* 从 application builder 解析 scope，进而解析 service provider */
+        
         // Create a scope for Configure, this allows creating scoped dependencies
         // without the hassle of manually creating a scope.
         using (var scope = builder.ApplicationServices.CreateScope())
@@ -954,15 +1016,13 @@ internal class ConfigureBuilder
                 {
                     try
                     {
-                        parameters[index] = serviceProvider
-                            .GetRequiredService(parameterInfo.ParameterType);
+                        parameters[index] = serviceProvider.GetRequiredService(parameterInfo.ParameterType);
                     }
                     catch (Exception ex)
                     {
                         throw new Exception(string.Format(
                             CultureInfo.InvariantCulture,
-                            "Could not resolve a service of type '{0}' 
-                            "for the parameter '{1}' of method '{2}' on type '{3}'.",
+                            "Could not resolve a service of type '{0}' for the parameter '{1}' of method '{2}' on type '{3}'.",
                             parameterInfo.ParameterType.FullName,
                             parameterInfo.Name,
                             MethodInfo.Name,
@@ -1008,7 +1068,8 @@ internal class StartupLoader
 internal class ConfigureServicesBuilder
 {            
     public MethodInfo? MethodInfo { get; }
-    // filter
+    
+    // configure service filter（使用 service collection 作为 container）
     public Func<Func<IServiceCollection, IServiceProvider?>, Func<IServiceCollection, IServiceProvider?>> 
         StartupServiceFilters { get; set; } = f => f;
     
@@ -1019,14 +1080,14 @@ internal class ConfigureServicesBuilder
     }
      
     // build => func<service collection, service provider> !!!
-    // （instance 是 container ）
+    // （instance 是 startup instance ）
     public Func<IServiceCollection, IServiceProvider?> Build(object instance) => services => Invoke(instance, services);
     
     private IServiceProvider? Invoke(object instance, IServiceCollection services)
     {
         // 执行 filter
         return StartupServiceFilters(Startup)(services);
-        // 创建 service provider
+        // 由 method 创建 service provider
         IServiceProvider? Startup(IServiceCollection serviceCollection) => InvokeCore(instance, serviceCollection);
     }
             
@@ -1096,7 +1157,8 @@ internal class StartupLoader
 internal class ConfigureContainerBuilder
 {    
     public MethodInfo? MethodInfo { get; }
-    // filter
+    
+    // configure container filter
     public Func<Action<object>, Action<object>> ConfigureContainerFilters { get; set; } = f => f;
     
     public ConfigureContainerBuilder(MethodInfo? configureContainerMethod)
@@ -1110,9 +1172,9 @@ internal class ConfigureContainerBuilder
             
     private void Invoke(object instance, object container)
     {
-        // 执行 filter
+        // 执行 configure container filter
         ConfigureContainerFilters(StartupConfigureContainer)(container);
-        
+        // 由 method 配置 container builder
         void StartupConfigureContainer(object containerBuilder) => InvokeCore(instance, containerBuilder);
     }
     
@@ -1195,23 +1257,32 @@ internal class StartupLoader
             ConfigureContainerBuilder configureContainerBuilder,
             object instance)
         {
-            HostingServiceProvider = hostingServiceProvider;            
+            // 注入 host service provider
+            // （web host builder 只注入服务配置，由 web host service 再创建 service provider，
+            // 所以此时的 service provider 由 IHost 提供）
+            HostingServiceProvider = hostingServiceProvider;   
+            
             // 注入 configure service builder (configure*service method)
             ConfigureServicesBuilder = configureServicesBuilder;
+            
             // 注入 configure container builder (configure*container method)
             ConfigureContainerBuilder = configureContainerBuilder;
+            
+            // 注入 startup instance
             Instance = instance;
         }
                        
         // build => func<service collection, service provider>
         public override Func<IServiceCollection, IServiceProvider> Build()
         {
-            // 配置 configure service builder，注入 filter a
-            ConfigureServicesBuilder.StartupServiceFilters = BuildStartupServicesFilterPipeline;            
+            // 向 configure service builder 注入 filter -a 
+            ConfigureServicesBuilder.StartupServiceFilters = BuildStartupServicesFilterPipeline;    
+            // 执行 configure service builder，构建 func<service collection, service provider>
             var configureServicesCallback = ConfigureServicesBuilder.Build(Instance);
             
-            // 配置 configure container builder，注入 filter b
+            // 向 configure container builder 注入 filter -b
             ConfigureContainerBuilder.ConfigureContainerFilters = ConfigureContainerPipeline;
+            // 执行 configure container builder，构建 actin<container>
             var configureContainerCallback = ConfigureContainerBuilder.Build(Instance);
             
             // 
@@ -1222,21 +1293,22 @@ internal class StartupLoader
             {
                 return Target;
                 
-                // The ConfigureContainer pipeline needs an Action<TContainerBuilder> as source, so we just adapt the
-                // signature with this function.
-                void Source(TContainerBuilder containerBuilder) => action(containerBuilder);
-                
                 // The ConfigureContainerBuilder.ConfigureContainerFilters expects an Action<object> as value, but our pipeline
                 // produces an Action<TContainerBuilder> given a source, so we wrap it on an Action<object> that internally casts
                 // the object containerBuilder to TContainerBuilder to match the expected signature of our ConfigureContainer pipeline.
                 void Target(object containerBuilder) =>
                     // b2
                     BuildStartupConfigureContainerFiltersPipeline(Source)((TContainerBuilder)containerBuilder);
+                
+                // The ConfigureContainer pipeline needs an Action<TContainerBuilder> as source, so we just adapt the
+                // signature with this function.
+                void Source(TContainerBuilder containerBuilder) => action(containerBuilder);
             }
         }
                 
         // a- filter of "configure service" -> IStartupConfigureServicesFilter
         // "IStartupConfigureServicesFilter" 过时
+        // "startup configure service filter" 不能返回（创建）service provider！！！
         private Func<IServiceCollection, IServiceProvider?> BuildStartupServicesFilterPipeline(
             Func<IServiceCollection, IServiceProvider?> startup)
         {
@@ -1270,7 +1342,7 @@ internal class StartupLoader
                 
                 void InvokeStartup(IServiceCollection serviceCollection)
                 {
-                    // 执行 startup
+                    // 执行传入的 startup
                     var result = startup(serviceCollection);
                     // 如果有 fitler，不能返回 service provider（scope 不同）
                     if (filters.Length > 0 && result != null)
@@ -1311,7 +1383,7 @@ internal class StartupLoader
         }
     }    
               
-    // 构建 func<service collection, service provider>
+    // c- 构建 func<service collection, service provider>
     Func<IServiceCollection, IServiceProvider> ConfigureServices(
         Func<IServiceCollection, IServiceProvider?> configureServicesCallback,
         Action<object> configureContainerCallback)
@@ -1335,8 +1407,12 @@ internal class StartupLoader
             {
                 // 从 host services 中解析 service provider factory <t>
                 var serviceProviderFactory = HostingServiceProvider.GetRequiredService<IServiceProviderFactory<TContainerBuilder>>();  
-                var builder = serviceProviderFactory.CreateBuilder(services);                
-                configureContainerCallback(builder);                
+                // 创建 container
+                var builder = serviceProviderFactory.CreateBuilder(services);     
+                
+                // 使用解析的 configure container delegate 配置 container
+                configureContainerCallback(builder);               
+                // 使用 container、service provider factory 创建 service provider
                 applicationServiceProvider = serviceProviderFactory.CreateServiceProvider(builder);
             }
             // （由上），没有 configure*container 方法，默认构建 service provider
@@ -1344,7 +1420,9 @@ internal class StartupLoader
             {
                 // 从 host services 中解析 service provider factory <service collection>
                 var serviceProviderFactory = HostingServiceProvider.GetRequiredService<IServiceProviderFactory<IServiceCollection>>();
+                // 创建 container（service collection）
                 var builder = serviceProviderFactory.CreateBuilder(services);
+                // 创建 service provider
                 applicationServiceProvider = serviceProviderFactory.CreateServiceProvider(builder);
             }
             
@@ -1417,6 +1495,8 @@ internal class GenericWebHostService : IHostedService
 ```c#
 internal class GenericWebHostServiceOptions
 {
+    // 配置 application builder 的委托，
+    // 在 generic web host builder 中创建并注入？？
     public Action<IApplicationBuilder>? ConfigureApplication { get; set; }
     
     // Always set when options resolved by DI
@@ -1699,6 +1779,8 @@ internal class GenericWebHostService : IHostedService
 
 ##### 3.1.3 startup filter
 
+* 配置 application builder
+
 ```c#
 public interface IStartupFilter
 {        
@@ -1740,7 +1822,7 @@ internal class GenericWebHostBuilder :
 
 ```
 
-##### 3.3.1 配置 host configuration
+##### 3.3.1 构造 - 注入 host configuration
 
 ```c#
 internal class GenericWebHostBuilder 
@@ -1749,7 +1831,7 @@ internal class GenericWebHostBuilder
         IHostBuilder builder, 
         WebHostBuilderOptions options)
     {
-        // 创建 configuration builder
+        // 创建 configuration builder，注入 memory collection source
         var configBuilder = new ConfigurationBuilder().AddInMemoryCollection();       
         
         // 如果 web host builder options 没有标记 suppress environment configuration，
@@ -1777,7 +1859,7 @@ internal class GenericWebHostBuilder
 
 ```
 
-##### 3.3.2 执行 hosting startup
+##### 3.3.2 构造 - 执行 hosting startup
 
 ```c#
 internal class GenericWebHostBuilder 
@@ -1882,7 +1964,7 @@ public interface IHostingStartup
 
 ```
 
-##### 3.3.3 配置 application configuration
+##### 3.3.3 构造 - 注入 application configuration
 
 ```c#
 internal class GenericWebHostBuilder
@@ -1947,7 +2029,7 @@ internal class GenericWebHostBuilder
 
 ```
 
-##### 3.3.4 注入 host service
+##### 3.3.4 构造 - 注入 host service
 
 ```c#
 internal class GenericWebHostBuilder
@@ -2049,14 +2131,12 @@ internal class GenericWebHostBuilder
     }
     
     // configure service
-    public IWebHostBuilder ConfigureServices(
-        Action<IServiceCollection> configureServices)
+    public IWebHostBuilder ConfigureServices(Action<IServiceCollection> configureServices)
     {
         return ConfigureServices((context, services) => configureServices(services));
     }
     
-    public IWebHostBuilder ConfigureServices(
-        Action<WebHostBuilderContext, IServiceCollection> configureServices)
+    public IWebHostBuilder ConfigureServices(Action<WebHostBuilderContext, IServiceCollection> configureServices)
     {
         _builder.ConfigureServices((context, builder) =>
         {
@@ -2183,72 +2263,87 @@ internal class GenericWebHostBuilder
                 throw new NotSupportedException($"ConfigureServices returning an {typeof(IServiceProvider)} isn't supported.");
             }
             
-            /* configure services */
+            /* 类似 configure service delegate builder */
             
-            // 创建 host service provider，注入 host builder context 中
+            // 创建 startup instance，
             instance ??= ActivatorUtilities.CreateInstance(
+                // service provider
                 new HostServiceProvider(webHostBuilderContext), 
                 startupType);
-            
+            // 并注入 host builder context
             context.Properties[_startupKey] = instance;
+            
+            /* 1- configure services by "configure service method" in "startup instance" */
             
             // 解析 startup type 中的 configure service builder，            
             var configureServicesBuilder = StartupLoader.FindConfigureServicesDelegate(
                 startupType, 
                 context.HostingEnvironment.EnvironmentName);
-            // 并由 func 创建 configure services            
+            // 由 configure service builder 构建 configure services delegate（void）           
             var configureServices = configureServicesBuilder.Build(instance);
-            // 调用 configure services -> services provider
+            // 由 configure services delegate 配置 IHost 中的 "service collection"         
             configureServices(services);
             
-            /* configure container */
+            /* 1- end */
+            
+            /* 2- configure container by "configure container method" in "startup instance" */
             
             // 解析 startup type 中的 configure container builder                   
             var configureContainerBuilder = StartupLoader.FindConfigureContainerDelegate(
                 startupType, 
                 context.HostingEnvironment.EnvironmentName);
-            
+            // 如果 builder 中 method info 不为 null，
+            // 即 startup instance 中定义了 "configure container" 方法，即使用 specific service container
             if (configureContainerBuilder.MethodInfo != null)
             {
-                /* 缓存 container type */
+                /* 缓存 container type */                
+                // 解析 container type
                 var containerType = configureContainerBuilder.GetContainerType();
                 // Store the builder in the property bag
                 _builder.Properties[typeof(ConfigureContainerBuilder)] = configureContainerBuilder;
                 
+                /* 创建 action<host builder context， tcontainer> 委托 */
+                // 定义 action<host builder context, tcontainer> 类型
                 var actionType = typeof(Action<,>).MakeGenericType(
                     typeof(HostBuilderContext), 
                     containerType);
                 
-                // 解析 generic web host builder 的 private "configureContainerImpl" 作为 callback
-                // Get the private ConfigureContainer method on this type then close over the container type
+                // 获取 this. private "configureContainerImpl"，
+                // 作为 action<host builder context, tcontainer> 委托（callback）
                 var configureCallback = typeof(GenericWebHostBuilder).GetMethod(
 											                    	nameof(ConfigureContainerImpl), 
 											                    	BindingFlags.NonPublic | BindingFlags.Instance)!                 
                     											 .MakeGenericMethod(containerType)                                   
 											                     .CreateDelegate(actionType, this);
 
-                // 调用 configure 方法（如果没有，使用 callback）
+                // 反射调用 IHost.ConfigureContainer(Action<HostBuilderContext, TContainer> 方法
                 typeof(IHostBuilder).GetMethod(nameof(IHostBuilder.ConfigureContainer))!
                     			   .MakeGenericMethod(containerType)
                     			   .InvokeWithoutWrappingExceptions(
                     					_builder, 
                     					new object[] { configureCallback });
             }
-                        
-            // 解析 startup type 中的 configure builder
-            // Resolve Configure after calling ConfigureServices and ConfigureContainer
+            
+            /* 2- end */
+            
+            /* 3- configure application builder */
+            
+            // 解析 startup instance 中的 configure builder           
             configureBuilder = StartupLoader.FindConfigureDelegate(
                 startupType, 
                 context.HostingEnvironment.EnvironmentName);
+            
+            /* 3- end */
         }
         catch (Exception ex) when (webHostOptions.CaptureStartupErrors)
         {
             startupError = ExceptionDispatchInfo.Capture(ex);
         }
                
-        // 注入 generic web host service options action        
+        // 注入 generic web host service options       
         services.Configure<GenericWebHostServiceOptions>(options =>
         {
+            // 注入 configure application (builder) action
             options.ConfigureApplication = app =>
             {
                 // Throw if there was any errors initializing startup
@@ -2257,7 +2352,7 @@ internal class GenericWebHostBuilder
                 // Execute Startup.Configure
                 if (instance != null && configureBuilder != null)
                 {
-                    // 由 configure builder 构建 configure 并执行
+                    // 由 configure builder 构建 configure delegate 并执行
                     configureBuilder.Build(instance)(app);
                 }
             };
@@ -2277,9 +2372,12 @@ internal class GenericWebHostBuilder
             TContainer container) 
             	where TContainer : notnull
     {
-        // 从 host builder context 解析 configure container func（fallback）
+        // 解析 startup instance
         var instance = context.Properties[_startupKey];
+        // 解析 configure container builder
         var builder = (ConfigureContainerBuilder)context.Properties[typeof(ConfigureContainerBuilder)];
+              
+        // 由 configure container builder 构建 configure container delegate，并执行
         builder.Build(instance)(container);
     }
 }
@@ -2357,14 +2455,17 @@ internal class HostingStartupWebHostBuilder :
 	ISupportsUseDefaultServiceProvider
 {                            
     private readonly GenericWebHostBuilder _builder;
+        
     public HostingStartupWebHostBuilder(GenericWebHostBuilder builder)
     {
+        // 注入 generic web host builder
         _builder = builder;
     }
-            
-    // configure service 
+      
+    /* 方法 - configure services */
+    // configure service action
     private Action<WebHostBuilderContext, IServiceCollection>? _configureServices;    
-        
+    // 执行 configure service action 
     public void ConfigureServices(
         WebHostBuilderContext context, 
         IServiceCollection services)
@@ -2372,9 +2473,10 @@ internal class HostingStartupWebHostBuilder :
         _configureServices?.Invoke(context, services);
     }
     
-    // configure configuration
+    /* 方法 - configure application configuration */
+    // configure application configuration action
     private Action<WebHostBuilderContext, IConfigurationBuilder>? _configureConfiguration;
-        
+    // 执行 configure application configuration action    
     public void ConfigureAppConfiguration(
         WebHostBuilderContext context, 
         IConfigurationBuilder builder)
@@ -2396,7 +2498,7 @@ internal class HostingStartupWebHostBuilder
         throw new NotSupportedException($"Building this implementation of {nameof(IWebHostBuilder)} is not supported.");
     }
     
-    // configure applicatino configuration
+    // configure application configuration， -> 注入 configure application configuration action
     public IWebHostBuilder ConfigureAppConfiguration(
         Action<WebHostBuilderContext, IConfigurationBuilder> configureDelegate)
     {
@@ -2404,15 +2506,14 @@ internal class HostingStartupWebHostBuilder
         return this;
     }
     
-    // configure service
-    public IWebHostBuilder ConfigureServices(
-        Action<IServiceCollection> configureServices)
+    // configure service，-> 注入 configure service collection action
+    public IWebHostBuilder ConfigureServices(Action<IServiceCollection> configureServices)
     {
         return ConfigureServices((context, services) => configureServices(services));
     }
     
-    public IWebHostBuilder ConfigureServices(
-        Action<WebHostBuilderContext, IServiceCollection> configureServices)
+    // configure service，-> 注入 configure service collection action with web host builder context
+    public IWebHostBuilder ConfigureServices(Action<WebHostBuilderContext, IServiceCollection> configureServices)
     {
         _configureServices += configureServices;
         return this;
@@ -2435,6 +2536,8 @@ internal class HostingStartupWebHostBuilder
 ```c#
 internal class HostingStartupWebHostBuilder
 {
+    // 调用 generic web host builder 的方法
+    
     public IWebHostBuilder Configure(Action<WebHostBuilderContext, IApplicationBuilder> configure)
     {
         return _builder.Configure(configure);
@@ -2459,6 +2562,7 @@ internal class HostingStartupWebHostBuilder
 ```c#
 internal class HostingStartupWebHostBuilder
 {
+    // 调用 generic web host builder 的方法
     public IWebHostBuilder UseDefaultServiceProvider(
         Action<WebHostBuilderContext, 
         ServiceProviderOptions> configure)
@@ -2471,7 +2575,7 @@ internal class HostingStartupWebHostBuilder
 
 #### 3.5 注册 generic web host service
 
-##### 3.5.1 configure web host in "generic host"
+##### 3.5.1 configure web host in "generic host builder"
 
 ```c#
 public static class GenericHostWebHostBuilderExtensions
@@ -2502,11 +2606,11 @@ public static class GenericHostWebHostBuilderExtensions
             throw new ArgumentNullException(nameof(configureWebHostBuilder));
         }
         
-        // 配置 web host builder options
+        // 创建并配置 web host builder options
         var webHostBuilderOptions = new WebHostBuilderOptions();
         configureWebHostBuilder(webHostBuilderOptions);
         
-        // 配置 web host builder
+        // 创建并配置 web host builder（注入相关服务）
         var webhostBuilder = new GenericWebHostBuilder(builder, webHostBuilderOptions);
         configure(webhostBuilder);
         
