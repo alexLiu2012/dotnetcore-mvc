@@ -84,7 +84,7 @@ namespace WebHostServiceTest
                 .ConfigureWebHost(builder => 
                 {
                     // xxx, version=...
-                    builder.UseStartup(typeof(Startup).FullName);
+                    builder.UseStartup(typeof(Startup).Assembly.FullName);
                                        
                     // human readable assembly name 
                     /* Assembly.GetAssembly(typeof(Startup)).GetName().Name*/

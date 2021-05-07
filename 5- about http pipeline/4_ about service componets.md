@@ -81,13 +81,16 @@ asp.net core 2.1 时用的路由方式
 ```c#
 public interface IServer : IDisposable
 {    
+    // feature 容器
     IFeatureCollection Features { get; }
         
+    // start 方法
     Task StartAsync<TContext>(
         IHttpApplication<TContext> application, 
         CancellationToken cancellationToken) 
         	where TContext : notnull;     
     
+    // stop 方法
     Task StopAsync(CancellationToken cancellationToken);
 }
 
@@ -453,6 +456,7 @@ public class TestServer : IServer
     
     public IServiceProvider Services { get; }        
     public IFeatureCollection Features { get; }   
+    
     public Uri BaseAddress { get; set; } = new Uri("http://localhost/");
     public bool AllowSynchronousIO { get; set; }        
     public bool PreserveExecutionContext { get; set; }
@@ -501,22 +505,26 @@ public class TestServer : IServer
     {
     }
     
+    // the real ctor did
     public TestServer(
         IServiceProvider services, 
         IFeatureCollection featureCollection, 
         IOptions<TestServerOptions> optionsAccessor)
     {
+        // 注入 service provider
         Services = services ?? throw new ArgumentNullException(nameof(services));
-        Features = featureCollection ?? throw new ArgumentNullException(nameof(featureCollection));
-        
-        // 注入 test server options 并解析
+        // 注入 feature collection
+        Features = featureCollection ?? throw new ArgumentNullException(nameof(featureCollection));        
+        // 注入 test server options
         var options = optionsAccessor?.Value ?? throw new ArgumentNullException(nameof(optionsAccessor));
+        
+        // 由 test server options 解析
         AllowSynchronousIO = options.AllowSynchronousIO;
         PreserveExecutionContext = options.PreserveExecutionContext;
         BaseAddress = options.BaseAddress;
     }
 
-    /* 由 web host builder 构建 */                
+    /* 由 web host builder 构建，过时？？？*/                
     public TestServer(IWebHostBuilder builder) : this(builder, new FeatureCollection())
     {
     }
@@ -540,46 +548,14 @@ public class TestServer : IServer
         _hostInstance = host;        
         Services = host.Services;
     }
-                                      
-        
-    public HttpMessageHandler CreateHandler()
-    {
-        var pathBase = BaseAddress == null 
-            ? PathString.Empty 
-            : PathString.FromUriComponent(BaseAddress);
-        
-        return new ClientHandler(pathBase, Application) 
-    	    { 
-            	AllowSynchronousIO = AllowSynchronousIO, 
-            	PreserveExecutionContext = PreserveExecutionContext 
-        	};
-    }
+                                              
     
-    public HttpClient CreateClient()
-    {
-        return new HttpClient(CreateHandler()) 
-        	{ 
-            	BaseAddress = BaseAddress 
-        	};
-    }
+    
+    
         
-    public WebSocketClient CreateWebSocketClient()
-    {
-        var pathBase = BaseAddress == null 
-            ? PathString.Empty 
-            : PathString.FromUriComponent(BaseAddress);
-        
-        return new WebSocketClient(pathBase, Application) 
-        	{ 
-            	AllowSynchronousIO = AllowSynchronousIO,
-            	PreserveExecutionContext = PreserveExecutionContext 
-        	};
-    }
+    
             
-    public RequestBuilder CreateRequest(string path)
-    {
-        return new RequestBuilder(this, path);
-    }
+    
            
     public async Task<HttpContext> SendAsync(
         Action<HttpContext> configureContext, 
@@ -658,19 +634,22 @@ internal class ApplicationWrapper<TContext> :
 	ApplicationWrapper, 
 	IHttpApplication<TContext> where TContext : notnull
 {
+    // 封装 http application 实例
     private readonly IHttpApplication<TContext> _application;
-    // 处理 http request 的委托（钩子）
+    // pre process request 委托
     private readonly Action _preProcessRequestAsync;
     
     public ApplicationWrapper(
         IHttpApplication<TContext> application, 
         Action preProcessRequestAsync)
     {
+        // 注入 http application
         _application = application;
+        // 注入 pre process request 委托
         _preProcessRequestAsync = preProcessRequestAsync;
     }
     
-    // create context
+    // create context，调用封装的 http application 实例的方法
     internal override object CreateContext(IFeatureCollection features)
     {
         return ((IHttpApplication<TContext>)this).CreateContext(features);
@@ -681,7 +660,7 @@ internal class ApplicationWrapper<TContext> :
         return _application.CreateContext(features);
     }
     
-    // process request 
+    // process request，调用封装的 http application 实例的方法
     internal override Task ProcessRequestAsync(object context)
     {
         return ((IHttpApplication<TContext>)this).ProcessRequestAsync((TContext)context);
@@ -693,7 +672,7 @@ internal class ApplicationWrapper<TContext> :
         return _application.ProcessRequestAsync(context);
     }
     
-    // dispose context
+    // dispose context，调用封装的 http application 实例的方法
     internal override void DisposeContext(object context, Exception? exception)
     {
         ((IHttpApplication<TContext>)this).DisposeContext((TContext)context, exception);
@@ -747,12 +726,822 @@ public class TestServer : IServer
 
 ```
 
-##### 2.3.4 in "generic host"
+##### 2.3.4 方法-  http message handler / http client
+
+###### 2.3.4.1 client handler
+
+```c#
+public class ClientHandler : HttpMessageHandler
+{
+    private readonly ApplicationWrapper _application;
+    private readonly PathString _pathBase;
+        
+    internal bool AllowSynchronousIO { get; set; }    
+    internal bool PreserveExecutionContext { get; set; }
+    
+    internal ClientHandler(PathString pathBase, ApplicationWrapper application)
+    {
+        // 注入 http application wrapper
+        _application = application ?? throw new ArgumentNullException(nameof(application));
+        
+        // 注入 path base（如果以“/”结尾，去掉“/”）       
+        if (pathBase.HasValue && pathBase.Value.EndsWith('/'))
+        {
+            pathBase = new PathString(pathBase.Value[..^1]); 
+        }
+        _pathBase = pathBase;
+    }
+    
+    
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        if (request == null)
+        {
+            throw new ArgumentNullException(nameof(request));
+        }
+        
+        // 创建 http context builder
+        var contextBuilder = new HttpContextBuilder(_application, AllowSynchronousIO, PreserveExecutionContext);     
+        
+        /* a- 设置 http context request */
+        
+        // 从 http request message 解析 content
+        var requestContent = request.Content;    
+        
+        // a1- 如果 content 不为 null，向 http context builder 注册 send stream
+        if (requestContent != null)
+        {
+            // Read content from the request HttpContent into a pipe in a background task. 
+            // This will allow the request delegate to start before the request HttpContent is complete. 
+            // A background task allows duplex streaming scenarios.
+            contextBuilder.SendRequestStream(async writer =>
+                {
+                    if (requestContent is StreamContent)
+                    {
+                        // This is odd but required for backwards compat. If StreamContent is passed in then seek to beginning.
+                        // This is safe because StreamContent.ReadAsStreamAsync doesn't block. It will return the inner stream.
+                        var body = await requestContent.ReadAsStreamAsync();
+                        if (body.CanSeek)
+                        {
+                            // This body may have been consumed before, rewind it.
+                            body.Seek(0, SeekOrigin.Begin);
+                        }
+                        
+                        await body.CopyToAsync(writer);
+                    }
+                    else
+                    {
+                        await requestContent.CopyToAsync(writer.AsStream());
+                    }
+                    
+                    await writer.CompleteAsync();
+                });
+        }
+        
+        // a2- 注册 http context 委托
+        contextBuilder.Configure((context, reader) =>
+            {
+                // 解析 http context 中的 request
+                var req = context.Request;
+                
+                // 设置（http context request）的 http protocol
+                if (request.Version == HttpVersion.Version20)
+                {                   
+                    req.Protocol = HttpProtocol.Http2;
+                }
+                else
+                {
+                    req.Protocol = "HTTP/" + request.Version.ToString(fieldCount: 2);
+                }
+                
+                // 设置（http context request）的 http method
+                req.Method = request.Method.ToString();
+                
+                // 设置（http context request）的 http scheme
+                req.Scheme = request.RequestUri!.Scheme;
+                
+                // 设置（http context request）的 body 和 header
+                var canHaveBody = false;
+                if (requestContent != null)
+                {
+                    canHaveBody = true;
+                    // Chunked takes precedence over Content-Length, don't create a request with both Content-Length and chunked.
+                    if (request.Headers.TransferEncodingChunked != true)
+                    {
+                        // Reading the ContentLength will add it to the Headers‼                       
+                        var contentLength = requestContent.Headers.ContentLength;
+                        if (!contentLength.HasValue && 
+                            request.Version == HttpVersion.Version11)
+                        {
+                            // HTTP/1.1 requests with a body require either Content-Length or Transfer-Encoding: chunked.
+                            request.Headers.TransferEncodingChunked = true;
+                        }
+                        else if (contentLength == 0)
+                        {
+                            canHaveBody = false;
+                        }
+                    }
+                    
+                    // 遍历 http request message content 中的 header，追加到 http context 的 request 中
+                    foreach (var header in requestContent.Headers)
+                    {
+                        req.Headers.Append(header.Key, header.Value.ToArray());
+                    }
+
+                    // 如果（http context request）have body，注入 stream wrapper 
+                    if (canHaveBody)
+                    {
+                        req.Body = new AsyncStreamWrapper(
+                            reader.AsStream(), 
+                            () => contextBuilder.AllowSynchronousIO);
+                    }
+                }
+                
+                // 设置（http context request）的 request body detection feature
+                context.Features.Set<IHttpRequestBodyDetectionFeature>(new RequestBodyDetectionFeature(canHaveBody));
+
+                // 遍历 http request message 中的 header，-> 追加到 http context 的 request
+                foreach (var header in request.Headers)
+                {
+                    // User-Agent is a space delineated single line header but HttpRequestHeaders parses it as multiple elements.
+                    if (string.Equals(
+                        	header.Key, 
+                        	HeaderNames.UserAgent, 
+                        	StringComparison.OrdinalIgnoreCase))
+                    {
+                        req.Headers.Append(header.Key, string.Join(" ", header.Value));
+                    }
+                    else
+                    {
+                        req.Headers.Append(header.Key, header.Value.ToArray());
+                    }
+                }
+
+                // 设置（http context request）的 host，
+                // 如果 http request message 中没有显示指定，从 request uri 中解析
+                if (!req.Host.HasValue)
+                {                    
+                    req.Host = HostString.FromUriComponent(request.RequestUri);
+                    if (request.RequestUri.IsDefaultPort)
+                    {
+                        req.Host = new HostString(req.Host.Host);
+                    }
+                }
+
+                // 设置（http context request）的 path、base path、query string
+                req.Path = PathString.FromUriComponent(request.RequestUri);                
+                req.PathBase = PathString.Empty;
+                if (req.Path.StartsWithSegments(_pathBase, out var remainder))
+                {
+                    req.Path = remainder;
+                    req.PathBase = _pathBase;
+                }
+                
+                // 设置（http context request）的 query string
+                req.QueryString = QueryString.FromUriComponent(request.RequestUri);
+            });
+        
+        /* b- 发送 request、创建 http context */
+        
+        // 创建 http response message（预结果）
+        var response = new HttpResponseMessage();
+        
+        // 注册 response read complete 回调
+        contextBuilder.RegisterResponseReadCompleteCallback(context =>
+            {
+                var responseTrailersFeature = context.Features.Get<IHttpResponseTrailersFeature>()!;
+                                                                
+                foreach (var trailer in responseTrailersFeature.Trailers)
+                {
+                    bool success = response.TrailingHeaders.TryAddWithoutValidation(
+                        trailer.Key, 
+                        (IEnumerable<string>)trailer.Value);
+                    
+                    Contract.Assert(success, "Bad trailer");
+                }
+            });
+        
+        // 发送、创建 http context
+        var httpContext = await contextBuilder.SendAsync(cancellationToken);
+        
+        /* c- 配置 http context response */
+        
+        // 解析 http context 的 statue code，注入 http response message（预结果）
+        response.StatusCode = (HttpStatusCode)httpContext.Response.StatusCode;
+        
+        // 解析 http context 的 reason phrase，注入 http response message（预结果）
+        response.ReasonPhrase = httpContext.Features.Get<IHttpResponseFeature>()!.ReasonPhrase;
+        
+        // 将传入的 http request message 注入 http response message（预结果）
+        response.RequestMessage = request;
+        
+        // 将传入的 http request message 的 version 注入 http response message（预结果）
+        response.Version = request.Version;
+        
+        // 创建 stream content，注入 http response message（预结果）
+        response.Content = new StreamContent(httpContext.Response.Body);
+        
+        // 遍历 http context response 的 header，追加到 http response message（预结果）
+        foreach (var header in httpContext.Response.Headers)
+        {
+            if (!response.Headers.TryAddWithoutValidation(header.Key, (IEnumerable<string>)header.Value))
+            {
+                bool success = response.Content.Headers.TryAddWithoutValidation(
+                    header.Key, 
+                    (IEnumerable<string>)header.Value);
+                
+                Contract.Assert(success, "Bad header");
+            }
+        }
+        
+        return response;
+    }
+}
+
+```
+
+###### 2.3.4.2 http context builder
+
+```c#
+internal class HttpContextBuilder : IHttpBodyControlFeature, IHttpResetFeature
+{
+    private readonly ApplicationWrapper _application;
+    private readonly bool _preserveExecutionContext;
+    public bool AllowSynchronousIO { get; set; }
+    
+    private readonly HttpContext _httpContext;
+    
+    private readonly Pipe _requestPipe;
+    private readonly RequestLifetimeFeature _requestLifetimeFeature;
+    
+    private readonly TaskCompletionSource<HttpContext> _responseTcs = 
+        new TaskCompletionSource<HttpContext>(TaskCreationOptions.RunContinuationsAsynchronously);   
+    
+    private readonly ResponseBodyReaderStream _responseReaderStream;
+    private readonly ResponseBodyPipeWriter _responsePipeWriter;
+    private readonly ResponseFeature _responseFeature;    
+    private readonly ResponseTrailersFeature _responseTrailersFeature = new ResponseTrailersFeature();
+    
+    private bool _pipelineFinished;
+    private bool _returningResponse;
+    private object? _testContext;
+    
+    
+    private Action<HttpContext>? _responseReadCompleteCallback;
+    private Task? _sendRequestStreamTask;
+    
+    internal HttpContextBuilder(
+        ApplicationWrapper application, 
+        bool allowSynchronousIO, 
+        bool preserveExecutionContext)
+    {
+        // 注入 http application wrapper
+        _application = application ?? throw new ArgumentNullException(nameof(application));
+        // 注入 allow synchronous io 标志
+        AllowSynchronousIO = allowSynchronousIO;
+        // 注入 preserve execution context 标志
+        _preserveExecutionContext = preserveExecutionContext;
+        
+        // 创建 http context
+        _httpContext = new DefaultHttpContext();
+        // 创建 response feature
+        _responseFeature = new ResponseFeature(Abort);
+        // 创建 response lifetime feature 
+        _requestLifetimeFeature = new RequestLifetimeFeature(Abort);
+        
+        // 设置 http context 的 request 的 protocol = http1，method = get（默认值）
+        var request = _httpContext.Request;
+        request.Protocol = HttpProtocol.Http11;
+        request.Method = HttpMethods.Get;
+        
+        // 创建 request pipe
+        _requestPipe = new Pipe();
+        
+        // 创建 response pipe
+        var responsePipe = new Pipe();
+        
+        // - 由 response pipe 创建 response body reader stream
+        _responseReaderStream = new ResponseBodyReaderStream(
+            responsePipe, 
+            ClientInitiatedAbort, 
+            () => _responseReadCompleteCallback?.Invoke(_httpContext));
+        // - 由 response pipe 创建 response body pipe writer
+        _responsePipeWriter = new ResponseBodyPipeWriter(
+            responsePipe, 
+            ReturnResponseMessageAsync);
+        
+        // 设置 response feature 的 body，-> response body writer stream
+        _responseFeature.Body = new ResponseBodyWriterStream(
+            _responsePipeWriter, 
+            () => AllowSynchronousIO);
+        // 设置 response feature 的 body writer，-> response body pipe writer
+        _responseFeature.BodyWriter = _responsePipeWriter;
+        
+        // 注入 feature
+        _httpContext.Features.Set<IHttpBodyControlFeature>(this);
+        _httpContext.Features.Set<IHttpResponseFeature>(_responseFeature);
+        _httpContext.Features.Set<IHttpResponseBodyFeature>(_responseFeature);
+        _httpContext.Features.Set<IHttpRequestLifetimeFeature>(_requestLifetimeFeature);
+        _httpContext.Features.Set<IHttpResponseTrailersFeature>(_responseTrailersFeature);
+    }
+    
+    // Triggered by request CancellationToken canceling or response stream Disposal.
+    internal void ClientInitiatedAbort()
+    {
+        if (!_pipelineFinished)
+        {
+            // We don't want to trigger the token for already completed responses.
+            _requestLifetimeFeature.Cancel();
+        }
+        
+        // Writes will still succeed, the app will only get an error if they check the CT.
+        _responseReaderStream.Abort(new IOException("The client aborted the request."));
+        
+        // Cancel any pending request async activity when the client aborts a duplex
+        // streaming scenario by disposing the HttpResponseMessage.
+        CancelRequestBody();
+    }
+    
+    private void CancelRequestBody()
+    {
+        _requestPipe.Writer.CancelPendingFlush();
+        _requestPipe.Reader.CancelPendingRead();
+    }
+    
+    /* 方法 */
+    
+    // 配置 http context、request pipe reader
+    internal void Configure(Action<HttpContext, PipeReader> configureContext)
+    {
+        if (configureContext == null)
+        {
+            throw new ArgumentNullException(nameof(configureContext));
+        }
+        
+        configureContext(_httpContext, _requestPipe.Reader);
+    }
+    
+    // 注入 send request stream 委托
+    internal void SendRequestStream(Func<PipeWriter, Task> sendRequestStream)
+    {
+        if (sendRequestStream == null)
+        {
+            throw new ArgumentNullException(nameof(sendRequestStream));
+        }
+        
+        _sendRequestStreamTask = sendRequestStream(_requestPipe.Writer);
+    }
+    
+    // 注入 response read complete 回调
+    internal void RegisterResponseReadCompleteCallback(Action<HttpContext> responseReadCompleteCallback)
+    {
+        _responseReadCompleteCallback = responseReadCompleteCallback;
+    }
+    
+    // send
+    internal Task<HttpContext> SendAsync(CancellationToken cancellationToken)
+    {
+        // cancel token
+        var registration = cancellationToken.Register(ClientInitiatedAbort);
+                
+        async Task RunRequestAsync()
+        {
+            // 如果是 http2，-> 设置 http reset feature
+            if (HttpProtocol.IsHttp2(_httpContext.Request.Protocol))
+            {                
+                _httpContext.Features.Set<IHttpResetFeature>(this);
+            }
+            
+            // 由 http application wrapper 创建 http context
+            _testContext = _application.CreateContext(_httpContext.Features);
+            
+            try
+            {
+                // 执行 http application wrapper 的 process request 方法
+                await _application.ProcessRequestAsync(_testContext);
+                
+                // s1- 
+                // 判断 request in process
+                var requestBodyInProgress = RequestBodyReadInProgress();
+                
+                // 如果 request in process = true（还在 request 中），-> cancel request body
+                if (requestBodyInProgress)
+                {                    
+                    CancelRequestBody();
+                }
+                
+                // s2- 
+                // Matches Kestrel server: response is completed before request is drained
+                await CompleteResponseAsync();
+                
+                // 如果 request in process = false（request 完成），-> request pipe reader complete
+                if (!requestBodyInProgress)
+                {
+                    // Writer was already completed in send request callback.
+                    await _requestPipe.Reader.CompleteAsync();                                        
+                }
+                
+                // 执行 httpapplication wrapper 的 dispose context 方法
+                _application.DisposeContext(_testContext, exception: null);
+            }
+            catch (Exception ex)
+            {
+                // s3- 
+                Abort(ex);
+                _application.DisposeContext(_testContext, ex);
+            }
+            finally
+            {
+                registration.Dispose();
+            }
+        }
+        
+        // Async offload, don't let the test code block the caller.
+        if (_preserveExecutionContext)
+        {
+            _ = Task.Factory.StartNew(RunRequestAsync);
+        }
+        else
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(_ =>
+                {
+                    _ = RunRequestAsync();
+                }, null);
+        }
+        
+        return _responseTcs.Task;
+    }
+    
+    // s1- 
+    private bool RequestBodyReadInProgress()
+    {
+        try
+        {
+            return !_requestPipe.Reader.TryRead(out var result) || !result.IsCompleted;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "An error occurred when completing the request. 
+                "Request delegate may have finished while there is a pending read of the request body.", 
+                ex);
+        }
+    }
+    
+    // s2- 
+    internal async Task CompleteResponseAsync()
+    {
+        _pipelineFinished = true;
+        await ReturnResponseMessageAsync();
+        _responsePipeWriter.Complete();
+        await _responseFeature.FireOnResponseCompletedAsync();
+    }
+        
+    internal async Task ReturnResponseMessageAsync()
+    {
+        // Check if the response is already returning because the TrySetResult below could happen a bit late
+        // (as it happens on a different thread) by which point the CompleteResponseAsync could run and calls this
+        // method again.
+        if (!_returningResponse)
+        {
+            _returningResponse = true;
+            
+            try
+            {
+                await _responseFeature.FireOnSendingHeadersAsync();
+            }
+            catch (Exception ex)
+            {
+                Abort(ex);
+                return;
+            }
+            
+            /* 设置 http context 的 feature collection */
+            
+            // Copy the feature collection so we're not multi-threading on the same collection.
+            var newFeatures = new FeatureCollection();
+            foreach (var pair in _httpContext.Features)
+            {
+                newFeatures[pair.Key] = pair.Value;
+            }
+            
+            // 从 http context 中解析 http response feature
+            var serverResponseFeature = _httpContext.Features.Get<IHttpResponseFeature>()!;
+            // 创建 client response feature
+            var clientResponseFeature = new HttpResponseFeature()
+            {
+                StatusCode = serverResponseFeature.StatusCode,
+                ReasonPhrase = serverResponseFeature.ReasonPhrase,
+                Headers = serverResponseFeature.Headers,
+                Body = _responseReaderStream
+            };
+            
+            // 注入 http response feature
+            newFeatures.Set<IHttpResponseFeature>(clientResponseFeature);
+            // 注入 http response body feature
+            newFeatures.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(_responseReaderStream));
+           
+            _responseTcs.TrySetResult(new DefaultHttpContext(newFeatures));
+        }
+    }
+        
+    // s3- 
+    internal void Abort(Exception exception)
+    {
+        _responsePipeWriter.Abort(exception);
+        _responseReaderStream.Abort(exception);
+        _requestLifetimeFeature.Cancel();
+        _responseTcs.TrySetException(exception);
+        CancelRequestBody();
+    }   
+    
+    void IHttpResetFeature.Reset(int errorCode)
+    {
+        Abort(new HttpResetTestException(errorCode));
+    }                        
+}
+
+```
+
+###### 2.3.4.3 create http message handler
+
+```c#
+public class TestServer : IServer
+{     
+    public HttpMessageHandler CreateHandler()
+    {
+        var pathBase = BaseAddress == null 
+            ? PathString.Empty 
+            : PathString.FromUriComponent(BaseAddress);
+        
+        return new ClientHandler(pathBase, Application) 
+    	    { 
+            	AllowSynchronousIO = AllowSynchronousIO, 
+            	PreserveExecutionContext = PreserveExecutionContext 
+        	};
+    }
+}
+
+```
+
+###### 2.3.4.4 create http client
+
+```c#
+public class TestServer : IServer
+{
+    public HttpClient CreateClient()
+    {
+        return new HttpClient(CreateHandler()) 
+        	{ 
+            	BaseAddress = BaseAddress 
+        	};
+    }
+}
+
+```
+
+##### 2.3.5 方法- about web socket
+
+###### 2.3.5.1 web socket client
+
+```c#
+public class WebSocketClient
+{
+    private readonly ApplicationWrapper _application;
+    private readonly PathString _pathBase;
+    
+    internal WebSocketClient(PathString pathBase, ApplicationWrapper application)
+    {
+        _application = application ?? throw new ArgumentNullException(nameof(application));
+        
+        // PathString.StartsWithSegments that we use below requires the base path to not end in a slash.
+        if (pathBase.HasValue && pathBase.Value.EndsWith('/'))
+        {
+            pathBase = new PathString(pathBase.Value[..^1]); // All but the last character.
+        }
+        _pathBase = pathBase;
+        
+        SubProtocols = new List<string>();
+    }
+    
+    
+    public IList<string> SubProtocols { get; }
+    
+       
+    public Action<HttpRequest>? ConfigureRequest { get; set; }
+    
+    internal bool AllowSynchronousIO { get; set; }
+    internal bool PreserveExecutionContext { get; set; }
+    
+    
+    public async Task<WebSocket> ConnectAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        WebSocketFeature? webSocketFeature = null;
+        var contextBuilder = new HttpContextBuilder(_application, AllowSynchronousIO, PreserveExecutionContext);
+        contextBuilder.Configure((context, reader) =>
+            {
+                var request = context.Request;
+                var scheme = uri.Scheme;
+                scheme = (scheme == "ws") ? "http" : scheme;
+                scheme = (scheme == "wss") ? "https" : scheme;
+                request.Scheme = scheme;
+                if (!request.Host.HasValue)
+                {
+                    request.Host = uri.IsDefaultPort
+                        ? new HostString(HostString.FromUriComponent(uri).Host)
+                        : HostString.FromUriComponent(uri);
+                }
+                request.Path = PathString.FromUriComponent(uri);
+                request.PathBase = PathString.Empty;
+                if (request.Path.StartsWithSegments(_pathBase, out var remainder))
+                {
+                    request.Path = remainder;
+                    request.PathBase = _pathBase;
+                }
+                request.QueryString = QueryString.FromUriComponent(uri);
+                request.Headers.Add(HeaderNames.Connection, new string[] { "Upgrade" });
+                request.Headers.Add(HeaderNames.Upgrade, new string[] { "websocket" });
+                request.Headers.Add(HeaderNames.SecWebSocketVersion, new string[] { "13" });
+                request.Headers.Add(HeaderNames.SecWebSocketKey, new string[] { CreateRequestKey() });
+                if (SubProtocols.Any())
+                {
+                    request.Headers.Add(HeaderNames.SecWebSocketProtocol, SubProtocols.ToArray());
+                }
+                
+                request.Body = Stream.Null;
+                
+                // WebSocket
+                webSocketFeature = new WebSocketFeature(context);
+                context.Features.Set<IHttpWebSocketFeature>(webSocketFeature);
+                
+                ConfigureRequest?.Invoke(context.Request);
+            });
+        
+        var httpContext = await contextBuilder.SendAsync(cancellationToken);
+        
+        if (httpContext.Response.StatusCode != StatusCodes.Status101SwitchingProtocols)
+        {
+            throw new InvalidOperationException(
+                "Incomplete handshake, status code: " + httpContext.Response.StatusCode);
+        }
+        
+        Debug.Assert(webSocketFeature != null);
+        if (webSocketFeature.ClientWebSocket == null)
+        {
+            throw new InvalidOperationException("Incomplete handshake");
+        }
+        
+        return webSocketFeature.ClientWebSocket;
+    }
+    
+    private string CreateRequestKey()
+    {
+        byte[] data = new byte[16];
+        RandomNumberGenerator.Fill(data);
+        return Convert.ToBase64String(data);
+    }
+    
+    private class WebSocketFeature : IHttpWebSocketFeature
+    {
+        private readonly HttpContext _httpContext;
+        
+        public WebSocketFeature(HttpContext context)
+        {
+            _httpContext = context;
+        }
+        
+        bool IHttpWebSocketFeature.IsWebSocketRequest => true;
+        
+        public WebSocket? ClientWebSocket { get; private set; }
+        
+        public WebSocket? ServerWebSocket { get; private set; }
+        
+        async Task<WebSocket> IHttpWebSocketFeature.AcceptAsync(WebSocketAcceptContext context)
+        {
+            var websockets = TestWebSocket.CreatePair(context.SubProtocol);
+            if (_httpContext.Response.HasStarted)
+            {
+                throw new InvalidOperationException("The response has already started");
+            }
+            
+            _httpContext.Response.StatusCode = StatusCodes.Status101SwitchingProtocols;
+            ClientWebSocket = websockets.Item1;
+            ServerWebSocket = websockets.Item2;
+            await _httpContext.Response.Body.FlushAsync(_httpContext.RequestAborted); 
+            // Send headers to the client
+            return ServerWebSocket;
+        }
+    }
+}
+
+
+```
+
+###### 2.3.5.2 create web socket client
+
+```c#
+public WebSocketClient CreateWebSocketClient()
+    {
+        var pathBase = BaseAddress == null 
+            ? PathString.Empty 
+            : PathString.FromUriComponent(BaseAddress);
+        
+        return new WebSocketClient(pathBase, Application) 
+        	{ 
+            	AllowSynchronousIO = AllowSynchronousIO,
+            	PreserveExecutionContext = PreserveExecutionContext 
+        	};
+    }
+```
+
+##### 2.3.6 方法- about request builder
+
+###### 2.3.6.1 request builder
+
+```c#
+public class RequestBuilder
+{
+    private readonly HttpRequestMessage _req;
+    public TestServer TestServer { get; }
+        
+    public RequestBuilder(TestServer server, string path)
+    {
+        TestServer = server ?? throw new ArgumentNullException(nameof(server));
+        _req = new HttpRequestMessage(HttpMethod.Get, path);
+    }
+          
+    public RequestBuilder And(Action<HttpRequestMessage> configure)
+    {
+        if (configure == null)
+        {
+            throw new ArgumentNullException(nameof(configure));
+        }
+        
+        configure(_req);
+        return this;
+    }
+        
+    public RequestBuilder AddHeader(string name, string value)
+    {
+        if (!_req.Headers.TryAddWithoutValidation(name, value))
+        {
+            if (_req.Content == null)
+            {
+                _req.Content = new StreamContent(Stream.Null);
+            }
+            if (!_req.Content.Headers.TryAddWithoutValidation(name, value))
+            {
+                // TODO: throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, Resources.InvalidHeaderName, name), "name");
+                throw new ArgumentException("Invalid header name: " + name, nameof(name));
+            }
+        }
+        return this;
+    }
+    
+    
+    public Task<HttpResponseMessage> SendAsync(string method)
+    {
+        _req.Method = new HttpMethod(method);
+        return TestServer.CreateClient().SendAsync(_req);
+    }
+        
+    public Task<HttpResponseMessage> GetAsync()
+    {
+        _req.Method = HttpMethod.Get;
+        return TestServer.CreateClient().SendAsync(_req);
+    }
+        
+    public Task<HttpResponseMessage> PostAsync()
+    {
+        _req.Method = HttpMethod.Post;
+        return TestServer.CreateClient().SendAsync(_req);
+    }
+}
+
+```
+
+###### 2.3.6.2 create request builder
+
+```c#
+public RequestBuilder CreateRequest(string path)
+    {
+        return new RequestBuilder(this, path);
+    }
+```
+
+
+
+
+
+##### 2.3.7 扩展方法 in "generic host"
+
+###### 2.3.7.1 use test server
 
 ```c#
 public static class WebHostBuilderExtensions
-{
-    // use test server 
+{     
     public static IWebHostBuilder UseTestServer(this IWebHostBuilder builder)
     {
         return builder.ConfigureServices(services =>
@@ -773,20 +1562,63 @@ public static class WebHostBuilderExtensions
                 services.AddSingleton<IServer, TestServer>();
             });
     }
-         
+}
+
+```
+
+###### 2.3.7.2 get test server
+
+```c#
+/* obsolete */
+public static class WebHostBuilderExtensions
+{
     /* not for generic web host service */
     public static TestServer GetTestServer(this IWebHost host)
     {
         return (TestServer)host.Services.GetRequiredService<IServer>();
     }
-       
+}
+
+// for generic host
+public static class HostBuilderTestServerExtensions
+{    
+    public static TestServer GetTestServer(this IHost host)
+    {
+        return (TestServer)host.Services.GetRequiredService<IServer>();
+    }        
+}
+
+```
+
+###### 2.3.7.3 get test client 
+
+```c#
+/* obsolete */
+public static class WebHostBuilderExtensions
+{
+    /* not for generic web host service */   
     public static HttpClient GetTestClient(this IWebHost host)
     {
         return host.GetTestServer().CreateClient();
     }            
-    /* not for generic web host service */
-    
-    // 配置 service
+}
+
+// for generic host
+public static class HostBuilderTestServerExtensions
+{        
+    public static HttpClient GetTestClient(this IHost host)
+    {
+        return host.GetTestServer().CreateClient();
+    }
+}
+
+```
+
+###### 2.3.7.4 configure service
+
+```c#
+public static class WebHostBuilderExtensions
+{
     public static IWebHostBuilder ConfigureTestServices(
         this IWebHostBuilder webHostBuilder, 
         Action<IServiceCollection> servicesConfiguration)
@@ -800,23 +1632,55 @@ public static class WebHostBuilderExtensions
             throw new ArgumentNullException(nameof(servicesConfiguration));
         }
         
+        // 如果是 generic web host builder，
         if (webHostBuilder.GetType().Name.Equals("GenericWebHostBuilder"))
-        {
-            // Generic host doesn't need to do anything special here since there's only one container.
+        {            
             webHostBuilder.ConfigureServices(servicesConfiguration);
         }
+        // * (obsolete) 否则，注入 startup configure service filter *
         else
         {            
             webHostBuilder.ConfigureServices(
                 s => s.AddSingleton<IStartupConfigureServicesFilter>(
-                    new ConfigureTestServicesStartupConfigureServicesFilter(servicesConfiguration)));
-            
+                    new ConfigureTestServicesStartupConfigureServicesFilter(servicesConfiguration)));            
         }
         
         return webHostBuilder;
     }
     
-    // 配置 service container    
+    // (obsolete) configure servcie filter
+    private class ConfigureTestServicesStartupConfigureServicesFilter : IStartupConfigureServicesFilter        
+    {
+        private readonly Action<IServiceCollection> _servicesConfiguration;
+        
+        public ConfigureTestServicesStartupConfigureServicesFilter(Action<IServiceCollection> servicesConfiguration)
+        {
+            if (servicesConfiguration == null)
+            {
+                throw new ArgumentNullException(nameof(servicesConfiguration));
+            }
+            
+            _servicesConfiguration = servicesConfiguration;
+        }
+        
+        public Action<IServiceCollection> ConfigureServices(Action<IServiceCollection> next) =>
+            serviceCollection =>
+                {
+                    next(serviceCollection);
+                    _servicesConfiguration(serviceCollection);
+                };
+        }
+}
+
+```
+
+###### 2.3.7.5 configure service container
+
+* obsolete
+
+```c#
+public static class WebHostBuilderExtensions
+{
     public static IWebHostBuilder ConfigureTestContainer<TContainer>(
         this IWebHostBuilder webHostBuilder, 
         Action<TContainer> servicesConfiguration)
@@ -830,6 +1694,7 @@ public static class WebHostBuilderExtensions
             throw new ArgumentNullException(nameof(servicesConfiguration));
         }
        
+        // * （obsolete) 注入 startup configure container filter *
         webHostBuilder.ConfigureServices(
             s => s.AddSingleton<IStartupConfigureContainerFilter<TContainer>>(
                 new ConfigureTestServicesStartupConfigureContainerFilter<TContainer>(servicesConfiguration)));
@@ -837,7 +1702,38 @@ public static class WebHostBuilderExtensions
         return webHostBuilder;
     }
     
-    // 配置 content root（solution directory / name）
+    // configure container filter
+    private class ConfigureTestServicesStartupConfigureContainerFilter<TContainer> : 
+    	IStartupConfigureContainerFilter<TContainer>        
+    {
+        private readonly Action<TContainer> _servicesConfiguration;
+        
+        public ConfigureTestServicesStartupConfigureContainerFilter(Action<TContainer> containerConfiguration)
+        {
+            if (containerConfiguration == null)
+            {
+                throw new ArgumentNullException(nameof(containerConfiguration));
+            }
+            
+            _servicesConfiguration = containerConfiguration;
+        }
+        
+        public Action<TContainer> ConfigureContainer(Action<TContainer> next) =>
+            containerBuilder =>
+                {
+            		next(containerBuilder);
+            		_servicesConfiguration(containerBuilder);
+                };
+    }
+}
+
+```
+
+###### 2.3.7.6 content root
+
+```c#
+public static class WebHostBuilderExtensions
+{                                              
     [SuppressMessage(
         "ApiDesign", 
         "RS0026:Do not add multiple public overloads with optional parameters", 
@@ -852,8 +1748,7 @@ public static class WebHostBuilderExtensions
             AppContext.BaseDirectory, 
             solutionName);
     }
-    
-    // 配置 content root
+        
     [SuppressMessage(
         "ApiDesign", 
         "RS0026:Do not add multiple public overloads with optional parameters", 
@@ -877,11 +1772,11 @@ public static class WebHostBuilderExtensions
         
         do
         {
-            var solutionPath = Directory.EnumerateFiles(directoryInfo.FullName, solutionName)
-                					  .FirstOrDefault();
+            var solutionPath = Directory.EnumerateFiles(directoryInfo.FullName, solutionName).FirstOrDefault();
             if (solutionPath != null)
             {
-                builder.UseContentRoot(Path.GetFullPath(Path.Combine(directoryInfo.FullName, solutionRelativePath)));
+                builder.UseContentRoot(
+                    Path.GetFullPath(Path.Combine(directoryInfo.FullName, solutionRelativePath)));
                 return builder;
             }
             
@@ -889,55 +1784,9 @@ public static class WebHostBuilderExtensions
         }
         while (directoryInfo!.Parent != null);
         
-        throw new InvalidOperationException($"Solution root could not be located using application root {applicationBasePath}.");
-    }
-    
-	
-    // configure servcie filter
-    private class ConfigureTestServicesStartupConfigureServicesFilter : IStartupConfigureServicesFilter        
-    {
-        private readonly Action<IServiceCollection> _servicesConfiguration;
-        
-        public ConfigureTestServicesStartupConfigureServicesFilter(Action<IServiceCollection> servicesConfiguration)
-        {
-            if (servicesConfiguration == null)
-            {
-                throw new ArgumentNullException(nameof(servicesConfiguration));
-            }
-            
-            _servicesConfiguration = servicesConfiguration;
-        }
-        
-        public Action<IServiceCollection> ConfigureServices(Action<IServiceCollection> next) =>
-            serviceCollection =>
-                {
-                    next(serviceCollection);
-                    _servicesConfiguration(serviceCollection);
-                };
-        }
-
-    // configure container filter
-    private class ConfigureTestServicesStartupConfigureContainerFilter<TContainer> : IStartupConfigureContainerFilter<TContainer>        
-    {
-        private readonly Action<TContainer> _servicesConfiguration;
-        
-        public ConfigureTestServicesStartupConfigureContainerFilter(Action<TContainer> containerConfiguration)
-        {
-            if (containerConfiguration == null)
-            {
-                throw new ArgumentNullException(nameof(containerConfiguration));
-            }
-            
-            _servicesConfiguration = containerConfiguration;
-        }
-        
-        public Action<TContainer> ConfigureContainer(Action<TContainer> next) =>
-            containerBuilder =>
-                {
-            		next(containerBuilder);
-            		_servicesConfiguration(containerBuilder);
-                };
-    }
+        throw new InvalidOperationException(
+            $"Solution root could not be located using application root {applicationBasePath}.");
+    }    	        
 }
 
 ```
@@ -1310,7 +2159,6 @@ public class HeaderDictionary : IHeaderDictionary
     }
 }
 
-
 ```
 
 ###### 2.1.1.2 know parser
@@ -1481,7 +2329,8 @@ public static class HeaderDictionaryTypeExtensions
     {
         // TODO: Cache the reflected type for later? Only if success?
         var type = typeof(T);
-        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(methodInfo =>
+        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+            			.FirstOrDefault(methodInfo =>
             {
                 if (string.Equals("TryParse", methodInfo.Name, StringComparison.Ordinal) && 
                     methodInfo.ReturnParameter.ParameterType.Equals(typeof(bool)))
@@ -1545,7 +2394,8 @@ public static class HeaderDictionaryTypeExtensions
     {
         // TODO: Cache the reflected type for later? Only if success?
         var type = typeof(T);
-        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(methodInfo =>
+        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+            			.FirstOrDefault(methodInfo =>
             {
                 if (string.Equals("TryParseList", methodInfo.Name, StringComparison.Ordinal) && 
                     methodInfo.ReturnParameter.ParameterType.Equals(typeof(Boolean)))
@@ -8363,7 +9213,7 @@ public class ApplicationBuilder : IApplicationBuilder
             
     /* 实现接口的 new 方法 */       
             
-    /* 实现了接口的 build 方法 */        
+    /* 实现接口的 build 方法 */        
 }
 
 ```
@@ -9033,8 +9883,7 @@ public static class MapExtensions
             preserveMatchedPathSegment: false, 
             configuration);
     }
-    
-    
+        
     public static IApplicationBuilder Map(
         this IApplicationBuilder app, 
         PathString pathMatch, 
