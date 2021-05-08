@@ -548,15 +548,7 @@ public class TestServer : IServer
         _hostInstance = host;        
         Services = host.Services;
     }
-                                              
-    
-    
-    
-        
-    
-            
-    
-           
+                                                                                                 
     public async Task<HttpContext> SendAsync(
         Action<HttpContext> configureContext, 
         CancellationToken cancellationToken = default)
@@ -751,8 +743,7 @@ public class ClientHandler : HttpMessageHandler
         }
         _pathBase = pathBase;
     }
-    
-    
+        
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -1312,47 +1303,60 @@ public class WebSocketClient
     private readonly ApplicationWrapper _application;
     private readonly PathString _pathBase;
     
-    internal WebSocketClient(PathString pathBase, ApplicationWrapper application)
-    {
-        _application = application ?? throw new ArgumentNullException(nameof(application));
-        
-        // PathString.StartsWithSegments that we use below requires the base path to not end in a slash.
-        if (pathBase.HasValue && pathBase.Value.EndsWith('/'))
-        {
-            pathBase = new PathString(pathBase.Value[..^1]); // All but the last character.
-        }
-        _pathBase = pathBase;
-        
-        SubProtocols = new List<string>();
-    }
-    
-    
-    public IList<string> SubProtocols { get; }
-    
-       
+    public IList<string> SubProtocols { get; }           
     public Action<HttpRequest>? ConfigureRequest { get; set; }
     
     internal bool AllowSynchronousIO { get; set; }
     internal bool PreserveExecutionContext { get; set; }
     
+    internal WebSocketClient(PathString pathBase, ApplicationWrapper application)
+    {
+        // 注入 http application wrapper
+        _application = application ?? throw new ArgumentNullException(nameof(application));
+        
+        // 注入 path base（如果以“/”结尾，去掉“/”）  
+        if (pathBase.HasValue && pathBase.Value.EndsWith('/'))
+        {
+            pathBase = new PathString(pathBase.Value[..^1]); 
+        }
+        _pathBase = pathBase;
+        
+        // 创建 sub protocols 集合（string 集合）
+        SubProtocols = new List<string>();
+    }
     
+    /* 方法- connect */
     public async Task<WebSocket> ConnectAsync(Uri uri, CancellationToken cancellationToken)
     {
         WebSocketFeature? webSocketFeature = null;
-        var contextBuilder = new HttpContextBuilder(_application, AllowSynchronousIO, PreserveExecutionContext);
+        
+        // 创建 http context builder
+        var contextBuilder = new HttpContextBuilder(
+            _application, 
+            AllowSynchronousIO, 
+            PreserveExecutionContext);
+        
+        /* 设置 request */
+        
+        // 向 http context builder 注入 http context 委托
         contextBuilder.Configure((context, reader) =>
             {
+                // 设置 http context 的 request 的 scheme
                 var request = context.Request;
                 var scheme = uri.Scheme;
                 scheme = (scheme == "ws") ? "http" : scheme;
                 scheme = (scheme == "wss") ? "https" : scheme;
                 request.Scheme = scheme;
+                
+                // 设置 http context 的 request 的 host
                 if (!request.Host.HasValue)
                 {
                     request.Host = uri.IsDefaultPort
                         ? new HostString(HostString.FromUriComponent(uri).Host)
                         : HostString.FromUriComponent(uri);
                 }
+                
+                // 设置 http context 的 request 的 path、base path
                 request.Path = PathString.FromUriComponent(uri);
                 request.PathBase = PathString.Empty;
                 if (request.Path.StartsWithSegments(_pathBase, out var remainder))
@@ -1360,27 +1364,37 @@ public class WebSocketClient
                     request.Path = remainder;
                     request.PathBase = _pathBase;
                 }
+                
+                // 设置 http context 的 request 的 query string
                 request.QueryString = QueryString.FromUriComponent(uri);
+                
+                // 设置 http context 的 request 的 header
                 request.Headers.Add(HeaderNames.Connection, new string[] { "Upgrade" });
                 request.Headers.Add(HeaderNames.Upgrade, new string[] { "websocket" });
                 request.Headers.Add(HeaderNames.SecWebSocketVersion, new string[] { "13" });
                 request.Headers.Add(HeaderNames.SecWebSocketKey, new string[] { CreateRequestKey() });
+                
+                // 向 http context 的 request 注入 sub protocols
                 if (SubProtocols.Any())
                 {
-                    request.Headers.Add(HeaderNames.SecWebSocketProtocol, SubProtocols.ToArray());
+                    request.Headers.Add(
+                        HeaderNames.SecWebSocketProtocol, 
+                        SubProtocols.ToArray());
                 }
                 
                 request.Body = Stream.Null;
                 
-                // WebSocket
+                // 向 http context 注入 http web socket feature
                 webSocketFeature = new WebSocketFeature(context);
                 context.Features.Set<IHttpWebSocketFeature>(webSocketFeature);
                 
                 ConfigureRequest?.Invoke(context.Request);
             });
         
+        /* 发送、创建 http context */
         var httpContext = await contextBuilder.SendAsync(cancellationToken);
         
+        /* 设置 response */
         if (httpContext.Response.StatusCode != StatusCodes.Status101SwitchingProtocols)
         {
             throw new InvalidOperationException(
@@ -1393,6 +1407,8 @@ public class WebSocketClient
             throw new InvalidOperationException("Incomplete handshake");
         }
         
+        // 返回 web socket feature 的 client web socket
+        // （web socket feature 被注入到 http context 中，在 http pipeline 被处理过）
         return webSocketFeature.ClientWebSocket;
     }
     
@@ -1414,13 +1430,13 @@ public class WebSocketClient
         
         bool IHttpWebSocketFeature.IsWebSocketRequest => true;
         
-        public WebSocket? ClientWebSocket { get; private set; }
-        
+        public WebSocket? ClientWebSocket { get; private set; }        
         public WebSocket? ServerWebSocket { get; private set; }
         
         async Task<WebSocket> IHttpWebSocketFeature.AcceptAsync(WebSocketAcceptContext context)
         {
             var websockets = TestWebSocket.CreatePair(context.SubProtocol);
+            
             if (_httpContext.Response.HasStarted)
             {
                 throw new InvalidOperationException("The response has already started");
@@ -1429,6 +1445,7 @@ public class WebSocketClient
             _httpContext.Response.StatusCode = StatusCodes.Status101SwitchingProtocols;
             ClientWebSocket = websockets.Item1;
             ServerWebSocket = websockets.Item2;
+            
             await _httpContext.Response.Body.FlushAsync(_httpContext.RequestAborted); 
             // Send headers to the client
             return ServerWebSocket;
@@ -1436,13 +1453,426 @@ public class WebSocketClient
     }
 }
 
+```
+
+###### 2.3.5.2 test web socket
+
+```c#
+internal class TestWebSocket : WebSocket
+{    
+    // buffer
+    private readonly ReceiverSenderBuffer _receiveBuffer;
+    private readonly ReceiverSenderBuffer _sendBuffer;
+        
+    // message
+    private Message? _receiveMessage;
+    
+    // sub protocol
+    private readonly string? _subProtocol;
+    public override string? SubProtocol
+    {
+        get { return _subProtocol; }
+    }
+    
+    // web socket state
+    private WebSocketState _state;
+    public override WebSocketState State
+    {
+        get { return _state; }
+    }
+    
+    // web socket close status
+    private WebSocketCloseStatus? _closeStatus;
+    public override WebSocketCloseStatus? CloseStatus
+    {
+        get { return _closeStatus; }
+    }
+    
+    // (web socket) close status description
+    private string? _closeStatusDescription;
+    public override string? CloseStatusDescription
+    {
+        get { return _closeStatusDescription; }
+    }
+    
+    /* 方法- 创建 client - server pair（sender buffer - receivebuffer）*/            
+    public static Tuple<TestWebSocket, TestWebSocket> CreatePair(string? subProtocol)
+    {
+        var buffers = new[] { new ReceiverSenderBuffer(), new ReceiverSenderBuffer() };
+        return Tuple.Create(
+            new TestWebSocket(subProtocol, buffers[0], buffers[1]),
+            new TestWebSocket(subProtocol, buffers[1], buffers[0]));
+    }
+    // 私有 ctor
+    private TestWebSocket(
+        string? subProtocol, 
+        ReceiverSenderBuffer readBuffer, 
+        ReceiverSenderBuffer writeBuffer)
+    {
+        // 设置 web socket state 为 open
+        _state = WebSocketState.Open;
+        
+        // 注入 sup protocols
+        _subProtocol = subProtocol;
+        // 注入 receive buffer（read）
+        _receiveBuffer = readBuffer;
+        // 注入 send buffer（write）
+        _sendBuffer = writeBuffer;
+    }
+    
+                
+    public async override Task CloseAsync(
+        WebSocketCloseStatus closeStatus, 
+        string? statusDescription, 
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        
+        if (State == WebSocketState.Open || State == WebSocketState.CloseReceived)
+        {
+            // Send a close message.
+            await CloseOutputAsync(closeStatus, statusDescription, cancellationToken);
+        }
+        
+        if (State == WebSocketState.CloseSent)
+        {
+            // Do a receiving drain
+            var data = new byte[1024];
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await ReceiveAsync(new ArraySegment<byte>(data), cancellationToken);
+            }
+            while (result.MessageType != WebSocketMessageType.Close);
+        }
+    }
+    
+    public async override Task CloseOutputAsync(
+        WebSocketCloseStatus closeStatus, 
+        string? statusDescription, 
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        ThrowIfOutputClosed();
+        
+        var message = new Message(closeStatus, statusDescription);
+        await _sendBuffer.SendAsync(message, cancellationToken);
+        
+        if (State == WebSocketState.Open)
+        {
+            _state = WebSocketState.CloseSent;
+        }
+        else if (State == WebSocketState.CloseReceived)
+        {
+            _state = WebSocketState.Closed;
+            Close();
+        }
+    }
+    
+    public override void Abort()
+    {
+        if (_state >= WebSocketState.Closed) // or Aborted
+        {
+            return;
+        }
+        
+        _state = WebSocketState.Aborted;
+        Close();
+    }
+    
+    public override void Dispose()
+    {
+        if (_state >= WebSocketState.Closed) // or Aborted
+        {
+            return;
+        }
+        
+        _state = WebSocketState.Closed;
+        Close();
+    }
+    
+    public override async Task<WebSocketReceiveResult> ReceiveAsync(
+        ArraySegment<byte> buffer, 
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        ThrowIfInputClosed();
+        ValidateSegment(buffer);
+        // TODO: InvalidOperationException if any receives are currently in progress.
+        
+        Message? receiveMessage = _receiveMessage;
+        _receiveMessage = null;
+        if (receiveMessage == null)
+        {
+            receiveMessage = await _receiveBuffer.ReceiveAsync(cancellationToken);
+        }
+        if (receiveMessage.MessageType == WebSocketMessageType.Close)
+        {
+            _closeStatus = receiveMessage.CloseStatus;
+            _closeStatusDescription = receiveMessage.CloseStatusDescription ?? string.Empty;
+            var result = new WebSocketReceiveResult(
+                0, 
+                WebSocketMessageType.Close, 
+                true, 
+                _closeStatus, 
+                _closeStatusDescription);
+            
+            if (_state == WebSocketState.Open)
+            {
+                _state = WebSocketState.CloseReceived;
+            }
+            else if (_state == WebSocketState.CloseSent)
+            {
+                _state = WebSocketState.Closed;
+                Close();
+            }
+            return result;
+        }
+        else
+        {
+            int count = Math.Min(buffer.Count, receiveMessage.Buffer.Count);
+            bool endOfMessage = count == receiveMessage.Buffer.Count;
+            Array.Copy(
+                receiveMessage.Buffer.Array!, 
+                receiveMessage.Buffer.Offset, 
+                buffer.Array!, 
+                buffer.Offset, 
+                count);
+            if (!endOfMessage)
+            {
+                receiveMessage.Buffer = new ArraySegment<byte>(
+                    receiveMessage.Buffer.Array!, 
+                    receiveMessage.Buffer.Offset + count, 
+                    receiveMessage.Buffer.Count - count);
+                
+                _receiveMessage = receiveMessage;
+            }
+            endOfMessage = endOfMessage && receiveMessage.EndOfMessage;
+            return new WebSocketReceiveResult(count, receiveMessage.MessageType, endOfMessage);
+        }
+    }
+    
+    public override Task SendAsync(
+        ArraySegment<byte> buffer, 
+        WebSocketMessageType messageType, 
+        bool endOfMessage, 
+        CancellationToken cancellationToken)
+    {
+        ValidateSegment(buffer);
+        if (messageType != WebSocketMessageType.Binary && messageType != WebSocketMessageType.Text)
+        {
+            // Block control frames
+            throw new ArgumentOutOfRangeException(nameof(messageType), messageType, string.Empty);
+        }
+        
+        var message = new Message(buffer, messageType, endOfMessage);
+        return _sendBuffer.SendAsync(message, cancellationToken);
+    }
+    
+    private void Close()
+    {
+        _receiveBuffer.SetReceiverClosed();
+        _sendBuffer.SetSenderClosed();
+    }
+    
+    private void ThrowIfDisposed()
+    {
+        if (_state >= WebSocketState.Closed) // or Aborted
+        {
+            throw new ObjectDisposedException(typeof(TestWebSocket).FullName);
+        }
+    }
+    
+    private void ThrowIfOutputClosed()
+    {
+        if (State == WebSocketState.CloseSent)
+        {
+            throw new InvalidOperationException("Close already sent.");
+        }
+    }
+        
+    private void ThrowIfInputClosed()
+    {
+        if (State == WebSocketState.CloseReceived)
+        {
+            throw new InvalidOperationException("Close already received.");
+        }
+    }
+    
+    private void ValidateSegment(ArraySegment<byte> buffer)
+    {
+        if (buffer.Array == null)
+        {
+            throw new ArgumentNullException(nameof(buffer));
+        }
+        if (buffer.Offset < 0 || buffer.Offset > buffer.Array.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(buffer.Offset), buffer.Offset, string.Empty);
+        }
+        if (buffer.Count < 0 || buffer.Count > buffer.Array.Length - buffer.Offset)
+        {
+            throw new ArgumentOutOfRangeException(nameof(buffer.Count), buffer.Count, string.Empty);
+        }
+    }
+    
+    
+    // message class
+    private class Message
+    {
+        public WebSocketCloseStatus? CloseStatus { get; set; }
+        public string? CloseStatusDescription { get; set; }
+        public ArraySegment<byte> Buffer { get; set; }
+        public bool EndOfMessage { get; set; }
+        public WebSocketMessageType MessageType { get; set; }
+        
+        public Message(
+            ArraySegment<byte> buffer, 
+            WebSocketMessageType messageType, 
+            bool endOfMessage)
+        {
+            Buffer = buffer;
+            CloseStatus = null;
+            CloseStatusDescription = null;
+            EndOfMessage = endOfMessage;
+            MessageType = messageType;
+        }
+        
+        public Message(
+            WebSocketCloseStatus? closeStatus, 
+            string? closeStatusDescription)
+        {
+            Buffer = new ArraySegment<byte>(Array.Empty<byte>());
+            CloseStatus = closeStatus;
+            CloseStatusDescription = closeStatusDescription;
+            MessageType = WebSocketMessageType.Close;
+            EndOfMessage = true;
+        }                
+    }
+    
+    // receiver sender buffer class
+    private class ReceiverSenderBuffer
+    {
+        private bool _receiverClosed;
+        private bool _senderClosed;
+        private bool _disposed;
+        private readonly SemaphoreSlim _sem;
+        private readonly Queue<Message> _messageQueue;
+        
+        public ReceiverSenderBuffer()
+        {
+            _sem = new SemaphoreSlim(0);
+            _messageQueue = new Queue<Message>();
+        }
+        
+        public async virtual Task<Message> ReceiveAsync(CancellationToken cancellationToken)
+        {
+            if (_disposed)
+            {
+                ThrowNoReceive();
+            }
+            
+            await _sem.WaitAsync(cancellationToken);
+            
+            lock (_messageQueue)
+            {
+                if (_messageQueue.Count == 0)
+                {
+                    _disposed = true;
+                    _sem.Dispose();
+                    ThrowNoReceive();
+                }
+                
+                return _messageQueue.Dequeue();
+            }
+        }
+        
+        public virtual Task SendAsync(Message message, CancellationToken cancellationToken)
+        {
+            lock (_messageQueue)
+            {
+                if (_senderClosed)
+                {
+                    throw new ObjectDisposedException(typeof(TestWebSocket).FullName);
+                }
+                if (_receiverClosed)
+                {
+                    throw new IOException(
+                        "The remote end closed the connection.", 
+                        new ObjectDisposedException(typeof(TestWebSocket).FullName));
+                }
+                
+                // we return immediately so we need to copy the buffer since the sender can re-use it
+                var array = new byte[message.Buffer.Count];
+                Array.Copy(
+                    message.Buffer.Array!, 
+                    message.Buffer.Offset, 
+                    array, 
+                    0, 
+                    message.Buffer.Count);
+                
+                message.Buffer = new ArraySegment<byte>(array);
+                
+                _messageQueue.Enqueue(message);
+                _sem.Release();
+                
+                return Task.FromResult(true);
+            }
+        }
+        
+        public void SetReceiverClosed()
+        {
+            lock (_messageQueue)
+            {
+                if (!_receiverClosed)
+                {
+                    _receiverClosed = true;
+                    if (!_disposed)
+                    {
+                        _sem.Release();
+                    }
+                }
+            }
+        }
+        
+        public void SetSenderClosed()
+        {
+            lock (_messageQueue)
+            {
+                if (!_senderClosed)
+                {
+                    _senderClosed = true;
+                    if (!_disposed)
+                    {
+                        _sem.Release();
+                    }
+                }
+            }
+        }
+        
+        private void ThrowNoReceive()
+        {
+            if (_receiverClosed)
+            {
+                throw new ObjectDisposedException(typeof(TestWebSocket).FullName);
+            }
+            else // _senderClosed
+            {
+                throw new IOException(
+                    "The remote end closed the connection.", 
+                    new ObjectDisposedException(typeof(TestWebSocket).FullName));
+            }
+        }
+    }
+}
 
 ```
 
-###### 2.3.5.2 create web socket client
+###### 2.3.5.3 create web socket client
 
 ```c#
-public WebSocketClient CreateWebSocketClient()
+public class TestServer : IServer
+{
+    public WebSocketClient CreateWebSocketClient()
     {
         var pathBase = BaseAddress == null 
             ? PathString.Empty 
@@ -1454,11 +1884,15 @@ public WebSocketClient CreateWebSocketClient()
             	PreserveExecutionContext = PreserveExecutionContext 
         	};
     }
+}
+
 ```
 
 ##### 2.3.6 方法- about request builder
 
 ###### 2.3.6.1 request builder
+
+* 强类型封装的 request
 
 ```c#
 public class RequestBuilder
@@ -1468,10 +1902,13 @@ public class RequestBuilder
         
     public RequestBuilder(TestServer server, string path)
     {
+        // 注入 test server
         TestServer = server ?? throw new ArgumentNullException(nameof(server));
+        // 创建 http request message
         _req = new HttpRequestMessage(HttpMethod.Get, path);
     }
           
+    // 方法- 配置 http request message
     public RequestBuilder And(Action<HttpRequestMessage> configure)
     {
         if (configure == null)
@@ -1483,6 +1920,7 @@ public class RequestBuilder
         return this;
     }
         
+    // 方法- add header
     public RequestBuilder AddHeader(string name, string value)
     {
         if (!_req.Headers.TryAddWithoutValidation(name, value))
@@ -1493,26 +1931,29 @@ public class RequestBuilder
             }
             if (!_req.Content.Headers.TryAddWithoutValidation(name, value))
             {
-                // TODO: throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, Resources.InvalidHeaderName, name), "name");
+                // TODO: 
+                // throw new ArgumentException(
+                // 	   string.Format(CultureInfo.CurrentCulture, Resources.InvalidHeaderName, name), 
+                // 	   "name");
                 throw new ArgumentException("Invalid header name: " + name, nameof(name));
             }
         }
         return this;
     }
     
-    
+    // send
     public Task<HttpResponseMessage> SendAsync(string method)
     {
         _req.Method = new HttpMethod(method);
         return TestServer.CreateClient().SendAsync(_req);
     }
-        
+    // get    
     public Task<HttpResponseMessage> GetAsync()
     {
         _req.Method = HttpMethod.Get;
         return TestServer.CreateClient().SendAsync(_req);
     }
-        
+    // post
     public Task<HttpResponseMessage> PostAsync()
     {
         _req.Method = HttpMethod.Post;
@@ -1525,15 +1966,15 @@ public class RequestBuilder
 ###### 2.3.6.2 create request builder
 
 ```c#
-public RequestBuilder CreateRequest(string path)
+public class TestServer : IServer
+{
+    public RequestBuilder CreateRequest(string path)
     {
         return new RequestBuilder(this, path);
     }
+}
+
 ```
-
-
-
-
 
 ##### 2.3.7 扩展方法 in "generic host"
 
@@ -8487,15 +8928,17 @@ internal class HostingApplication : IHttpApplication<HostingApplication.Context>
     private HostingApplicationDiagnostics _diagnostics;
     
     // 注入服务，
-    //   - http context factory，用于创建 http context
-    //   - request delegate，处理请求的最终委托
+    // - http context factory，用于创建 http context
+    // - request delegate，处理请求的最终委托
     public HostingApplication(
         RequestDelegate application,
         ILogger logger,
         DiagnosticListener diagnosticSource,
         IHttpContextFactory httpContextFactory)
     {
+        // 注入 request delegate
         _application = application;
+        
         _diagnostics = new HostingApplicationDiagnostics(logger, diagnosticSource);
         
         // 注入 http context factory
@@ -9259,6 +9702,7 @@ public class ApplicationBuilder : IApplicationBuilder
 {        
     public RequestDelegate Build()
     {
+        // 起始的 request delegate（default），从 app 开始反向应用 middlewares
         // http context -> task
         RequestDelegate app = context =>
         {
