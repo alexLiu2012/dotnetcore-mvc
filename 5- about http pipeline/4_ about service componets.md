@@ -9815,14 +9815,7 @@ public static class UseMiddlewareExtensions
         params object?[] args)
     {
         return app.UseMiddleware(typeof(TMiddleware), args);
-    }
-    
-    public static IApplicationBuilder UseMiddleware(
-        this IApplicationBuilder app, 
-        [DynamicallyAccessedMembers(MiddlewareAccessibility)] Type middleware, 
-        params object?[] args)
-    {
-    
+    }        
 }
 
 ```
@@ -10615,16 +10608,13 @@ public static class RunExtensions
 ##### 3.3.10 application builder factory
 
 ```c#
+// 接口
 public interface IApplicationBuilderFactory
 {        
     IApplicationBuilder CreateBuilder(IFeatureCollection serverFeatures);
 }
 
-```
-
-###### 3.3.10.1 application builder factory
-
-```c#
+// 实现
 public class ApplicationBuilderFactory : IApplicationBuilderFactory
 {
     private readonly IServiceProvider _serviceProvider;        
@@ -10640,10 +10630,6 @@ public class ApplicationBuilderFactory : IApplicationBuilderFactory
 }
 
 ```
-
-
-
-
 
 #### 2.7 mvc
 

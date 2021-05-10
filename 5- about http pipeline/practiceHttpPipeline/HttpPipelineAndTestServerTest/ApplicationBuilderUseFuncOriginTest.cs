@@ -9,7 +9,7 @@ using Xunit;
 
 namespace HttpPipelineAndTestServerTest
 {
-    public class ApplicationBuilderTest
+    public class ApplicationBuilderUseFuncOriginTest
     {                                
 
         // while building the application pipeline wiht "applicaiton builder. builde" method, 
