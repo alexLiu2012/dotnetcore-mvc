@@ -486,10 +486,10 @@ public class TestServer : IServer
     public TestServer(
         IServiceProvider services, 
         IFeatureCollection featureCollection) : 
-    	this(
-            services, 
-            featureCollection, 
-            Options.Create(new TestServerOptions()))
+    		this(
+                services, 
+                featureCollection, 
+                Options.Create(new TestServerOptions()))
     {
         Services = services ?? throw new ArgumentNullException(nameof(services));
         Features = featureCollection ?? throw new ArgumentNullException(nameof(featureCollection));
